@@ -10,7 +10,7 @@ import plotly.express as px
 # ------------------------ ฟังก์ชันสำหรับ Random Forest ------------------------
 
 def load_data(file):
-    message_placeholder = st.empty()  # สร้างตำแหน่งที่ว่างสำหรับข้อความแจ้งเตือน
+    message_placeholder = st.empty()
     if file is None:
         st.error("ไม่มีไฟล์ที่อัปโหลด กรุณาอัปโหลดไฟล์ CSV")
         return None
@@ -20,19 +20,19 @@ def load_data(file):
         if df.empty:
             st.error("ไฟล์ CSV ว่างเปล่า กรุณาอัปโหลดไฟล์ที่มีข้อมูล")
             return None
-        message_placeholder.success("ไฟล์ถูกโหลดเรียบร้อยแล้ว")  # แสดงข้อความในตำแหน่งที่ว่าง
+        message_placeholder.success("ไฟล์ถูกโหลดเรียบร้อยแล้ว")
         return df
     except pd.errors.EmptyDataError:
-        st.error("ไม่สามารถอ่านข้อมูลจากไฟล์ได้ ไฟล์อาจว่างเปล่าหรือไม่ใช่ไฟล์ CSV ที่ถูกต้อง")
+        st.error("ไม่สามารถอ่านข้อมูลจากไฟล์ได้")
         return None
     except pd.errors.ParserError:
-        st.error("เกิดข้อผิดพลาดในการแยกวิเคราะห์ไฟล์ CSV กรุณาตรวจสอบรูปแบบของไฟล์")
+        st.error("เกิดข้อผิดพลาดในการแยกวิเคราะห์ไฟล์ CSV")
         return None
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการอ่านไฟล์: {e}")
         return None
     finally:
-        message_placeholder.empty()  # ลบข้อความแจ้งเตือนเมื่อเสร็จสิ้นการโหลดไฟล์
+        message_placeholder.empty()
 
 def clean_data(df):
     data_clean = df.copy()
@@ -40,22 +40,6 @@ def clean_data(df):
     data_clean = data_clean.dropna(subset=['datetime'])
     data_clean = data_clean[(data_clean['wl_up'] >= 100) & (data_clean['wl_up'] <= 450)]
     data_clean = data_clean[(data_clean['wl_up'] != 0) & (~data_clean['wl_up'].isna())]
-    return data_clean
-
-def create_time_features(data_clean):
-    if not pd.api.types.is_datetime64_any_dtype(data_clean['datetime']):
-        data_clean['datetime'] = pd.to_datetime(data_clean['datetime'], errors='coerce')
-
-    data_clean['year'] = data_clean['datetime'].dt.year
-    data_clean['month'] = data_clean['datetime'].dt.month
-    data_clean['day'] = data_clean['datetime'].dt.day
-    data_clean['hour'] = data_clean['datetime'].dt.hour
-    data_clean['minute'] = data_clean['datetime'].dt.minute
-    data_clean['day_of_week'] = data_clean['datetime'].dt.dayofweek
-    data_clean['day_of_year'] = data_clean['datetime'].dt.dayofyear
-    data_clean['week_of_year'] = data_clean['datetime'].dt.isocalendar().week
-    data_clean['days_in_month'] = data_clean['datetime'].dt.days_in_month
-
     return data_clean
 
 def prepare_features(data_clean):
@@ -67,25 +51,6 @@ def prepare_features(data_clean):
     X = data_clean[feature_cols]
     y = data_clean['wl_up']
     return X, y
-
-def train_and_evaluate_model(X, y, model_type='random_forest'):
-    # แบ่งข้อมูลเป็นชุดฝึกและชุดทดสอบ
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    # ฝึกโมเดลด้วยชุดฝึก
-    if model_type == 'random_forest':
-        model = train_random_forest(X_train, y_train)
-    elif model_type == 'linear_regression':
-        model = train_linear_regression_model(X_train, y_train)
-    else:
-        st.error("โมเดลที่เลือกไม่ถูกต้อง")
-        return None
-
-    # ตรวจสอบว่าฝึกโมเดลสำเร็จหรือไม่
-    if model is None:
-        st.error("การฝึกโมเดลล้มเหลว")
-        return None
-    return model
 
 def train_random_forest(X_train, y_train):
     param_distributions = {
@@ -116,7 +81,6 @@ def train_random_forest(X_train, y_train):
 
 # ------------------------ ฟังก์ชันสำหรับ Linear Regression ------------------------
 
-# ฟังก์ชันสำหรับการฝึก Linear Regression
 def train_linear_regression_model(X_train, y_train):
     model = LinearRegression()
     model.fit(X_train, y_train)
@@ -128,13 +92,13 @@ def load_and_clean_data(file):
         data = pd.read_csv(file)
         data['datetime'] = pd.to_datetime(data['datetime'])
         data.set_index('datetime', inplace=True)
-        data = data[data['wl_up'] >= 100]  # ลบข้อมูลที่มีค่า wl_up ต่ำกว่า 100
+        data = data[data['wl_up'] >= 100]
         return data
     except Exception as e:
         st.error(f"ไม่สามารถโหลดข้อมูลได้: {e}")
         return None
 
-# ฟังก์ชัน Linear Regression สำหรับสถานีตัวเอง
+# ฟังก์ชัน Linear Regression สำหรับสถานีตัวเอง (โค้ดส่วนที่ 1)
 def forecast_with_self_station(data, start_date, end_date):
     training_data_end = pd.to_datetime(end_date)
     training_data_start = pd.to_datetime(start_date)
@@ -145,7 +109,7 @@ def forecast_with_self_station(data, start_date, end_date):
 
     # สร้างฟีเจอร์ lag
     training_data = data.loc[training_data_start:training_data_end].copy()
-    lags = [1, 4, 96, 192]  # lag 15 นาที, 1 ชั่วโมง, 1 วัน, 2 วัน
+    lags = [1, 4, 96, 192]
     for lag in lags:
         training_data[f'lag_{lag}'] = training_data['wl_up'].shift(lag)
 
@@ -161,7 +125,6 @@ def forecast_with_self_station(data, start_date, end_date):
     model = LinearRegression()
     model.fit(X_train, y_train)
 
-    # พยากรณ์ล่วงหน้า
     forecast_periods = (pd.to_datetime(end_date) - pd.to_datetime(start_date)).total_seconds() // 900
     forecast_index = pd.date_range(start=start_date, periods=int(forecast_periods), freq='15T')
     forecasted_data = pd.DataFrame(index=forecast_index)
@@ -185,7 +148,7 @@ def forecast_with_self_station(data, start_date, end_date):
     forecasted_data.dropna(inplace=True)
     return forecasted_data
 
-# ฟังก์ชัน Linear Regression สำหรับสถานีข้างบน
+# ฟังก์ชัน Linear Regression สำหรับสถานีข้างบน (โค้ดส่วนที่ 2)
 def forecast_with_upstream_station(data, upstream_data, start_date, end_date, delay_hours):
     upstream_data = shift_upstream_data(upstream_data, delay_hours)
 
@@ -218,7 +181,6 @@ def forecast_with_upstream_station(data, upstream_data, start_date, end_date, de
     model = LinearRegression()
     model.fit(X_train, y_train)
 
-    # พยากรณ์ล่วงหน้า
     forecast_periods = (pd.to_datetime(end_date) - pd.to_datetime(start_date)).total_seconds() // 900
     forecast_index = pd.date_range(start=start_date, periods=int(forecast_periods), freq='15T')
     forecasted_data = pd.DataFrame(index=forecast_index)
@@ -269,7 +231,11 @@ st.sidebar.header("อัปโหลดข้อมูล")
 
 # ------------------ ส่วนของ Random Forest ------------------
 if model_choice == "Random Forest":
-    uploaded_file = st.sidebar.file_uploader("อัปโหลดไฟล์ CSV", type="csv")
+    use_upstream_station = st.sidebar.checkbox("ต้องการใช้สถานีใกล้เคียง", value=False)
+    if use_upstream_station:
+        uploaded_file_upstream = st.sidebar.file_uploader("อัปโหลดไฟล์ของสถานีใกล้เคียง", type="csv")
+
+    uploaded_file = st.sidebar.file_uploader("อัปโหลดไฟล์ CSV สำหรับสถานีทำนาย", type="csv")
     if uploaded_file:
         df = load_data(uploaded_file)
         if df is not None:
@@ -279,37 +245,38 @@ if model_choice == "Random Forest":
             X, y = prepare_features(df_clean)
             start_date = st.sidebar.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2024-06-01"))
             end_date = st.sidebar.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2024-06-30"))
-            
+
             model_rf = train_random_forest(X, y)
             st.success("Random Forest เทรนเรียบร้อยแล้ว")
 
 # ------------------ ส่วนของ Linear Regression ------------------
 elif model_choice == "Linear Regression":
+    use_upstream_station = st.sidebar.checkbox("ต้องการใช้สถานีใกล้เคียง", value=False)
+    if use_upstream_station:
+        uploaded_file_upstream = st.sidebar.file_uploader("อัปโหลดไฟล์ของสถานีใกล้เคียง", type="csv")
+
     uploaded_target_file = st.sidebar.file_uploader("อัปโหลดไฟล์ CSV สำหรับสถานีที่ต้องการทำนาย", type="csv")
-    use_upstream = st.sidebar.checkbox("ใช้ข้อมูลจากสถานีข้างบน", value=False)
-
-    if use_upstream:
-        uploaded_upstream_file = st.sidebar.file_uploader("อัปโหลดไฟล์ CSV สำหรับสถานีข้างบน", type="csv")
-        delay_hours = st.sidebar.slider("ระบุเวลาล่าช้า (ชั่วโมง)", 0, 48, 2)
-
+    
     if uploaded_target_file:
         target_data = load_and_clean_data(uploaded_target_file)
-        if use_upstream and uploaded_upstream_file:
-            upstream_data = load_and_clean_data(uploaded_upstream_file)
-        else:
-            upstream_data = None
 
-        # เลือกช่วงวันที่สำหรับพยากรณ์
-        start_date = st.sidebar.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2024-06-01"))
-        end_date = st.sidebar.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2024-06-30"))
+        if target_data is not None:
+            st.write("ข้อมูลที่โหลดมา:")
+            st.write(target_data.head())
 
-        if st.sidebar.button("ประมวลผลข้อมูล"):
-            if use_upstream and upstream_data is not None:
-                forecasted_data = forecast_with_upstream_station(target_data, upstream_data, start_date, end_date, delay_hours)
-                plot_data(target_data, forecasted=forecasted_data, title="การพยากรณ์ระดับน้ำโดยใช้ข้อมูลจากสถานีข้างบน")
+            start_date = st.sidebar.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2024-06-01"))
+            end_date = st.sidebar.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2024-06-30"))
+
+            if use_upstream_station and uploaded_file_upstream:
+                upstream_data = load_and_clean_data(uploaded_file_upstream)
+                if upstream_data is not None:
+                    delay_hours = st.sidebar.slider("ระบุเวลาล่าช้า (ชั่วโมง)", 0, 48, 2)
+                    forecasted_data = forecast_with_upstream_station(target_data, upstream_data, start_date, end_date, delay_hours)
+                    plot_data(target_data, forecasted=forecasted_data, title="การพยากรณ์ระดับน้ำโดยใช้สถานีใกล้เคียง")
             else:
                 forecasted_data = forecast_with_self_station(target_data, start_date, end_date)
-                plot_data(target_data, forecasted=forecasted_data, title="การพยากรณ์ระดับน้ำโดยใช้ข้อมูลจากสถานีตัวเอง")
+                plot_data(target_data, forecasted=forecasted_data, title="การพยากรณ์ระดับน้ำโดยใช้ข้อมูลตัวเอง")
+
 
 
 
