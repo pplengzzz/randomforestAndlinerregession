@@ -12,8 +12,14 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 # -------------------------------
 def clean_data(df):
     data_clean = df.copy()
+    if 'datetime' not in data_clean.columns:
+        st.error("ไม่มีคอลัมน์ 'datetime' ในไฟล์ CSV")
+        return pd.DataFrame()
     data_clean['datetime'] = pd.to_datetime(data_clean['datetime'], errors='coerce')
     data_clean = data_clean.dropna(subset=['datetime'])
+    if 'wl_up' not in data_clean.columns:
+        st.error("ไม่มีคอลัมน์ 'wl_up' ในไฟล์ CSV")
+        return pd.DataFrame()
     data_clean = data_clean[(data_clean['wl_up'] >= 100) & (data_clean['wl_up'] <= 450)]
     data_clean = data_clean[(data_clean['wl_up'] != 0) & (~data_clean['wl_up'].isna())]
     return data_clean
@@ -24,7 +30,6 @@ def clean_data(df):
 def create_time_features(data_clean):
     if not pd.api.types.is_datetime64_any_dtype(data_clean['datetime']):
         data_clean['datetime'] = pd.to_datetime(data_clean['datetime'], errors='coerce')
-
     data_clean['year'] = data_clean['datetime'].dt.year
     data_clean['month'] = data_clean['datetime'].dt.month
     data_clean['day'] = data_clean['datetime'].dt.day
@@ -34,7 +39,6 @@ def create_time_features(data_clean):
     data_clean['day_of_year'] = data_clean['datetime'].dt.dayofyear
     data_clean['week_of_year'] = data_clean['datetime'].dt.isocalendar().week
     data_clean['days_in_month'] = data_clean['datetime'].dt.days_in_month
-
     return data_clean
 
 # -------------------------------
@@ -628,79 +632,93 @@ if model_choice == "Random Forest":
             st.error("ไฟล์ CSV ว่างเปล่า กรุณาอัปโหลดไฟล์ที่มีข้อมูล")
         else:
             df = clean_data(df)
-            df = generate_missing_dates(df)
-
-            if use_second_file:
-                if uploaded_file2 is not None:
-                    df2 = pd.read_csv(uploaded_file2)
-                    if df2.empty:
-                        st.error("ไฟล์ CSV สถานีใกล้เคียงว่างเปล่า กรุณาอัปโหลดไฟล์ที่มีข้อมูล")
-                        df2 = None
-                    else:
-                        df2 = clean_data(df2)
-                        df2 = generate_missing_dates(df2)
-                else:
-                    st.warning("กรุณาอัปโหลดไฟล์ที่สอง (สถานีที่ก่อนหน้า)")
-                    df2 = None
+            if df.empty:
+                st.error("หลังจากการทำความสะอาดข้อมูลแล้วไม่มีข้อมูลที่เหลือ")
             else:
-                df2 = None
+                df = generate_missing_dates(df)
 
-            plot_data_preview(df, df2, total_time_lag)
-
-            if process_button:
-                processing_placeholder = st.empty()
-                processing_placeholder.text("กำลังประมวลผลข้อมูล...")
-
-                df['datetime'] = pd.to_datetime(df['datetime']).dt.tz_localize(None)
-
-                end_date_dt = pd.to_datetime(end_date) + pd.DateOffset(days=1)
-
-                df_filtered = df[(df['datetime'] >= pd.to_datetime(start_date)) & (df['datetime'] <= pd.to_datetime(end_date_dt))]
-
-                if use_second_file and uploaded_file2 and df2 is not None:
-                    df2['datetime'] = pd.to_datetime(df2['datetime']).dt.tz_localize(None)
-                    df2_filtered = df2[(df2['datetime'] >= pd.to_datetime(start_date)) & (df2['datetime'] <= pd.to_datetime(end_date_dt))]
-                    df2_filtered['datetime'] = df2_filtered['datetime'] + total_time_lag
-                    df2_clean = clean_data(df2_filtered)
-                else:
-                    df2_clean = None
-
-                df_clean = clean_data(df_filtered)
-
-                # ฟังก์ชัน merge_data ที่ขาดหายไป
-                def merge_data(df_main, df_secondary):
-                    if df_secondary is not None:
-                        merged_df = pd.merge(df_main, df_secondary, on='datetime', how='left', suffixes=('', '_secondary'))
-                        merged_df['wl_up'] = merged_df['wl_up'].fillna(merged_df['wl_up_secondary'])
-                        merged_df = merged_df.drop(columns=['wl_up_secondary'])
+                if use_second_file:
+                    if uploaded_file2 is not None:
+                        df2 = pd.read_csv(uploaded_file2)
+                        if df2.empty:
+                            st.error("ไฟล์ CSV สถานีใกล้เคียงว่างเปล่า กรุณาอัปโหลดไฟล์ที่มีข้อมูล")
+                            df2 = None
+                        else:
+                            df2 = clean_data(df2)
+                            if df2.empty:
+                                st.error("หลังจากการทำความสะอาดข้อมูลสถานีใกล้เคียงแล้วไม่มีข้อมูลที่เหลือ")
+                                df2 = None
+                            else:
+                                df2 = generate_missing_dates(df2)
                     else:
-                        merged_df = df_main.copy()
-                    return merged_df
-
-                df_merged = merge_data(df_clean, df2_clean)
-
-                if delete_data_option:
-                    delete_start_datetime = pd.to_datetime(f"{delete_start_date} {delete_start_time}")
-                    delete_end_datetime = pd.to_datetime(f"{delete_end_date} {delete_end_time}")
-                    df_deleted = delete_data_by_date_range(df_merged, delete_start_datetime, delete_end_datetime)
+                        st.warning("กรุณาอัปโหลดไฟล์ที่สอง (สถานีที่ก่อนหน้า)")
+                        df2 = None
                 else:
-                    df_deleted = df_merged.copy()
+                    df2 = None
 
-                df_clean = generate_missing_dates(df_deleted)
-                df_clean = fill_code_column(df_clean)
-                df_clean = create_time_features(df_clean)
+                plot_data_preview(df, df2, total_time_lag)
 
-                if 'wl_up_prev' not in df_clean.columns:
-                    df_clean['wl_up_prev'] = df_clean['wl_up'].shift(1)
-                df_clean['wl_up_prev'] = df_clean['wl_up_prev'].interpolate(method='linear')
+                if process_button:
+                    processing_placeholder = st.empty()
+                    processing_placeholder.text("กำลังประมวลผลข้อมูล...")
 
-                df_before_deletion = df_filtered.copy()
+                    df['datetime'] = pd.to_datetime(df['datetime']).dt.tz_localize(None)
 
-                df_handled = handle_missing_values_by_week(df_clean, start_date, end_date, model_type='random_forest')
+                    end_date_dt = pd.to_datetime(end_date) + pd.DateOffset(days=1)
 
-                processing_placeholder.empty()
+                    df_filtered = df[(df['datetime'] >= pd.to_datetime(start_date)) & (df['datetime'] <= pd.to_datetime(end_date_dt))]
 
-                plot_results(df_before_deletion, df_handled, df_deleted)
+                    if use_second_file and uploaded_file2 and df2 is not None:
+                        df2['datetime'] = pd.to_datetime(df2['datetime']).dt.tz_localize(None)
+                        df2_filtered = df2[(df2['datetime'] >= pd.to_datetime(start_date)) & (df2['datetime'] <= pd.to_datetime(end_date_dt))]
+                        df2_filtered['datetime'] = df2_filtered['datetime'] + total_time_lag
+                        df2_clean = clean_data(df2_filtered)
+                        if df2_clean.empty:
+                            st.warning("หลังจากการทำความสะอาดข้อมูลสถานีที่สองแล้วไม่มีข้อมูลที่เหลือ")
+                            df2_clean = None
+                    else:
+                        df2_clean = None
+
+                    df_clean = clean_data(df_filtered)
+                    if df_clean.empty:
+                        st.error("หลังจากการทำความสะอาดข้อมูลแล้วไม่มีข้อมูลที่เหลือในช่วงวันที่ที่เลือก")
+                        processing_placeholder.empty()
+                        st.stop()
+
+                    # ฟังก์ชัน merge_data ที่ขาดหายไป
+                    def merge_data(df_main, df_secondary):
+                        if df_secondary is not None:
+                            merged_df = pd.merge(df_main, df_secondary, on='datetime', how='left', suffixes=('', '_secondary'))
+                            merged_df['wl_up'] = merged_df['wl_up'].fillna(merged_df['wl_up_secondary'])
+                            merged_df = merged_df.drop(columns=['wl_up_secondary'])
+                        else:
+                            merged_df = df_main.copy()
+                        return merged_df
+
+                    df_merged = merge_data(df_clean, df2_clean)
+
+                    if delete_data_option:
+                        delete_start_datetime = pd.to_datetime(f"{delete_start_date} {delete_start_time}")
+                        delete_end_datetime = pd.to_datetime(f"{delete_end_date} {delete_end_time}")
+                        df_deleted = delete_data_by_date_range(df_merged, delete_start_datetime, delete_end_datetime)
+                    else:
+                        df_deleted = df_merged.copy()
+
+                    df_clean = generate_missing_dates(df_deleted)
+                    df_clean = fill_code_column(df_clean)
+                    df_clean = create_time_features(df_clean)
+
+                    if 'wl_up_prev' not in df_clean.columns:
+                        df_clean['wl_up_prev'] = df_clean['wl_up'].shift(1)
+                    df_clean['wl_up_prev'] = df_clean['wl_up_prev'].interpolate(method='linear')
+
+                    df_before_deletion = df_filtered.copy()
+
+                    df_handled = handle_missing_values_by_week(df_clean, start_date, end_date, model_type='random_forest')
+
+                    processing_placeholder.empty()
+
+                    plot_results(df_before_deletion, df_handled, df_deleted)
     else:
         st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผล")
 
@@ -711,97 +729,110 @@ elif model_choice == "Linear Regression":
             target_df = pd.read_csv(uploaded_fill_file)
         except Exception as e:
             st.error(f"เกิดข้อผิดพลาดในการโหลดไฟล์: {e}")
-            target_df = None
+            target_df = pd.DataFrame()
 
-        if target_df is not None:
+        if target_df.empty:
+            st.error("ไฟล์ CSV สำหรับเติมข้อมูลว่างเปล่า กรุณาอัปโหลดไฟล์ที่มีข้อมูล")
+        else:
             target_df = clean_data(target_df)
-            target_df = generate_missing_dates(target_df)
-            target_df = create_time_features(target_df)
-            target_df['wl_up_prev'] = target_df['wl_up'].shift(1)
-            target_df['wl_up_prev'] = target_df['wl_up_prev'].interpolate(method='linear')
+            if target_df.empty:
+                st.error("หลังจากการทำความสะอาดข้อมูลแล้วไม่มีข้อมูลที่เหลือ")
+            else:
+                target_df = generate_missing_dates(target_df)
+                target_df = create_time_features(target_df)
+                target_df['wl_up_prev'] = target_df['wl_up'].shift(1)
+                target_df['wl_up_prev'] = target_df['wl_up_prev'].interpolate(method='linear')
 
-            # โหลดข้อมูลสถานีใกล้เคียงถ้าเลือกใช้
-            if use_upstream and uploaded_up_file:
-                try:
-                    upstream_df = pd.read_csv(uploaded_up_file)
-                except Exception as e:
-                    st.error(f"เกิดข้อผิดพลาดในการโหลดไฟล์สถานีข้างบน: {e}")
+                # โหลดข้อมูลสถานีใกล้เคียงถ้าเลือกใช้
+                if use_upstream and uploaded_up_file:
+                    try:
+                        upstream_df = pd.read_csv(uploaded_up_file)
+                    except Exception as e:
+                        st.error(f"เกิดข้อผิดพลาดในการโหลดไฟล์สถานีข้างบน: {e}")
+                        upstream_df = pd.DataFrame()
+
+                    if upstream_df.empty:
+                        st.error("ไฟล์ CSV สถานีใกล้เคียงว่างเปล่า กรุณาอัปโหลดไฟล์ที่มีข้อมูล")
+                        upstream_df = pd.DataFrame()
+                    else:
+                        upstream_df = clean_data(upstream_df)
+                        if upstream_df.empty:
+                            st.error("หลังจากการทำความสะอาดข้อมูลสถานีใกล้เคียงแล้วไม่มีข้อมูลที่เหลือ")
+                            upstream_df = pd.DataFrame()
+                        else:
+                            upstream_df = generate_missing_dates(upstream_df)
+                            upstream_df = create_time_features(upstream_df)
+                            upstream_df['wl_up_prev'] = upstream_df['wl_up'].shift(1)
+                            upstream_df['wl_up_prev'] = upstream_df['wl_up_prev'].interpolate(method='linear')
+                else:
                     upstream_df = None
 
-                if upstream_df is not None:
-                    upstream_df = clean_data(upstream_df)
-                    upstream_df = generate_missing_dates(upstream_df)
-                    upstream_df = create_time_features(upstream_df)
-                    upstream_df['wl_up_prev'] = upstream_df['wl_up'].shift(1)
-                    upstream_df['wl_up_prev'] = upstream_df['wl_up_prev'].interpolate(method='linear')
-            else:
-                upstream_df = None
+                # แสดงกราฟข้อมูล
+                st.subheader('กราฟข้อมูลระดับน้ำ')
+                st.plotly_chart(plot_data_combined(target_df.set_index('datetime'), label='สถานีที่ต้องการทำนาย'))
+                if upstream_df is not None and not upstream_df.empty:
+                    st.plotly_chart(plot_data_combined(upstream_df.set_index('datetime'), label='สถานีใกล้เคียง (up)'))
+                else:
+                    st.info("ไม่มีข้อมูลสถานีใกล้เคียง")
 
-            # แสดงกราฟข้อมูล
-            st.subheader('กราฟข้อมูลระดับน้ำ')
-            st.plotly_chart(plot_data_combined(target_df.set_index('datetime'), label='สถานีที่ต้องการทำนาย'))
-            if upstream_df is not None:
-                st.plotly_chart(plot_data_combined(upstream_df.set_index('datetime'), label='สถานีใกล้เคียง (up)'))
-            else:
-                st.info("ไม่มีข้อมูลสถานีใกล้เคียง")
+                if process_button2:
+                    with st.spinner("กำลังพยากรณ์..."):
+                        start_datetime = pd.Timestamp.combine(forecast_start_date, forecast_start_time)
+                        end_datetime = pd.Timestamp.combine(forecast_end_date, forecast_end_time)
 
-            if process_button2:
-                with st.spinner("กำลังพยากรณ์..."):
-                    start_datetime = pd.Timestamp.combine(forecast_start_date, forecast_start_time)
-                    end_datetime = pd.Timestamp.combine(forecast_end_date, forecast_end_time)
-
-                    if start_datetime > end_datetime:
-                        st.error("วันและเวลาที่เริ่มต้นต้องไม่เกินวันและเวลาสิ้นสุด")
-                    else:
-                        selected_data = target_df[(target_df['datetime'] >= start_datetime) & (target_df['datetime'] <= end_datetime)].copy()
-
-                        if selected_data.empty:
-                            st.error("ไม่มีข้อมูลในช่วงวันที่ที่เลือก กรุณาเลือกวันที่ใหม่")
+                        if start_datetime > end_datetime:
+                            st.error("วันและเวลาที่เริ่มต้นต้องไม่เกินวันและเวลาสิ้นสุด")
                         else:
-                            forecast_start_date_actual = selected_data['datetime'].max() + pd.Timedelta(minutes=15)
+                            selected_data = target_df[(target_df['datetime'] >= start_datetime) & (target_df['datetime'] <= end_datetime)].copy()
 
-                            if use_upstream and upstream_df is not None:
-                                # พยากรณ์ด้วย Linear Regression (สองสถานี)
-                                forecasted_data = forecast_with_linear_regression_two(
-                                    data=target_df.set_index('datetime'),
-                                    upstream_data=upstream_df.set_index('datetime'),
-                                    forecast_start_date=forecast_start_date_actual,
-                                    delay_hours=delay_hours
-                                )
+                            if selected_data.empty:
+                                st.error("ไม่มีข้อมูลในช่วงวันที่ที่เลือก กรุณาเลือกวันที่ใหม่")
                             else:
-                                # พยากรณ์ด้วย Linear Regression (สถานีเดียว)
-                                forecasted_data = forecast_with_linear_regression_single(
-                                    data=target_df.set_index('datetime'),
-                                    forecast_start_date=forecast_start_date_actual
-                                )
+                                forecast_start_date_actual = selected_data['datetime'].max() + pd.Timedelta(minutes=15)
 
-                            if not forecasted_data.empty:
-                                st.subheader('กราฟข้อมูลพร้อมการพยากรณ์')
-                                st.plotly_chart(plot_data_combined(selected_data.set_index('datetime'), forecasted_data, label='สถานีที่ต้องการทำนาย'))
-
-                                # ตรวจสอบและคำนวณค่าความแม่นยำ
-                                mae, rmse, actual_forecasted_data = calculate_error_metrics(
-                                    original=target_df.set_index('datetime').reset_index(),
-                                    forecasted=forecasted_data.reset_index()
-                                )
-
-                                if actual_forecasted_data is not None:
-                                    st.subheader('ตารางข้อมูลเปรียบเทียบ')
-                                    comparison_table = pd.DataFrame({
-                                        'Datetime': actual_forecasted_data['datetime'],
-                                        'ค่าจริง (ถ้ามี)': actual_forecasted_data['Actual'],
-                                        'ค่าที่พยากรณ์': actual_forecasted_data['Forecasted']
-                                    })
-                                    st.dataframe(comparison_table)
-
-                                    st.write(f"Mean Absolute Error (MAE): {mae:.2f}")
-                                    st.write(f"Root Mean Squared Error (RMSE): {rmse:.2f}")
+                                if use_upstream and upstream_df is not None and not upstream_df.empty:
+                                    # พยากรณ์ด้วย Linear Regression (สองสถานี)
+                                    forecasted_data = forecast_with_linear_regression_two(
+                                        data=target_df.set_index('datetime'),
+                                        upstream_data=upstream_df.set_index('datetime'),
+                                        forecast_start_date=forecast_start_date_actual,
+                                        delay_hours=delay_hours
+                                    )
                                 else:
-                                    st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่า MAE และ RMSE ได้")
-                            else:
-                                st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
+                                    # พยากรณ์ด้วย Linear Regression (สถานีเดียว)
+                                    forecasted_data = forecast_with_linear_regression_single(
+                                        data=target_df.set_index('datetime'),
+                                        forecast_start_date=forecast_start_date_actual
+                                    )
+
+                                if not forecasted_data.empty:
+                                    st.subheader('กราฟข้อมูลพร้อมการพยากรณ์')
+                                    st.plotly_chart(plot_data_combined(selected_data.set_index('datetime'), forecasted_data, label='สถานีที่ต้องการทำนาย'))
+
+                                    # ตรวจสอบและคำนวณค่าความแม่นยำ
+                                    mae, rmse, actual_forecasted_data = calculate_error_metrics(
+                                        original=target_df,
+                                        forecasted=forecasted_data
+                                    )
+
+                                    if actual_forecasted_data is not None:
+                                        st.subheader('ตารางข้อมูลเปรียบเทียบ')
+                                        comparison_table = pd.DataFrame({
+                                            'Datetime': actual_forecasted_data['datetime'],
+                                            'ค่าจริง (ถ้ามี)': actual_forecasted_data['Actual'],
+                                            'ค่าที่พยากรณ์': actual_forecasted_data['Forecasted']
+                                        })
+                                        st.dataframe(comparison_table)
+
+                                        st.write(f"Mean Absolute Error (MAE): {mae:.2f}")
+                                        st.write(f"Root Mean Squared Error (RMSE): {rmse:.2f}")
+                                    else:
+                                        st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่า MAE และ RMSE ได้")
+                                else:
+                                    st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
     else:
         st.info("กรุณาอัปโหลดไฟล์ CSV สำหรับเติมข้อมูล เพื่อเริ่มต้นการพยากรณ์")
+
 
 
 
