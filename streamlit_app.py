@@ -275,7 +275,14 @@ def plot_results(data_before, data_filled, data_deleted):
         st.header("ผลค่าความแม่นยำ", divider='gray')
         st.info("ไม่สามารถคำนวณความแม่นยำได้เนื่องจากไม่มีค่าจริงให้เปรียบเทียบ")
     else:
-        calculate_error_metrics(data_before, data_filled)
+        mae, rmse, actual_forecasted_data = calculate_error_metrics(data_before, data_filled)
+        if actual_forecasted_data is not None:
+            st.header("ผลค่าความแม่นยำ", divider='gray')
+            st.write(f"Mean Absolute Error (MAE): {mae:.2f}")
+            st.write(f"Root Mean Squared Error (RMSE): {rmse:.2f}")
+            st.dataframe(actual_forecasted_data, use_container_width=True)
+        else:
+            st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่า MAE และ RMSE ได้")
 
 # -------------------------------
 # ฟังก์ชันสำหรับการแสดงตัวอย่างข้อมูล
@@ -559,6 +566,7 @@ with st.sidebar:
         model_choice = st.sidebar.radio("", ("Random Forest", "Linear Regression"))
 
     st.sidebar.title("ตั้งค่าข้อมูล")
+
     if model_choice == "Random Forest":
         with st.sidebar.expander("ตั้งค่า Random Forest", expanded=False):
             use_second_file = st.checkbox("ต้องการใช้สถานีใกล้เคียง", value=False)
@@ -592,34 +600,28 @@ with st.sidebar:
         process_button = st.button("ประมวลผล", type="primary")
 
     elif model_choice == "Linear Regression":
-        st.sidebar.title("ตั้งค่า Linear Regression")
-        
-        # อัปโหลดไฟล์สถานีที่ต้องการทำนาย
-        uploaded_fill_file = st.file_uploader("อัปโหลดไฟล์ CSV สำหรับเติมข้อมูล", type="csv")
-        
-        # กล่องติ๊กเลือกสถานีใกล้เคียง
-        use_upstream = st.checkbox("ต้องการใช้สถานีใกล้เคียง", value=False)
-        
-        if use_upstream:
-            # ถ้าติ๊กเลือกให้ใช้สถานีใกล้เคียง อัปโหลดไฟล์สถานีข้างบน
-            uploaded_up_file = st.file_uploader("อัปโหลดไฟล์ CSV ของสถานีข้างบน (upstream)", type="csv")
-            delay_hours = st.number_input("ระบุชั่วโมงหน่วงเวลาสำหรับการเชื่อมโยงข้อมูลจากสถานี upstream", value=0, min_value=0)
+        with st.sidebar.expander("ตั้งค่า Linear Regression", expanded=False):
+            use_upstream = st.checkbox("ต้องการใช้สถานีใกล้เคียง", value=False)
+            
+            if use_upstream:
+                uploaded_up_file = st.file_uploader("อัปโหลดไฟล์ CSV ของสถานีข้างบน (upstream)", type="csv", key="uploader_up_lr")
+                delay_hours = st.number_input("ระบุชั่วโมงหน่วงเวลาสำหรับการเชื่อมโยงข้อมูลจากสถานี upstream", value=0, min_value=0)
+            
+            uploaded_fill_file = st.file_uploader("อัปโหลดไฟล์ CSV สำหรับเติมข้อมูล", type="csv", key="uploader_fill_lr")
 
-        # เลือกช่วงวันที่และเวลาสำหรับการพยากรณ์
-        with st.sidebar.expander("เลือกช่วงวันสำหรับพยากรณ์", expanded=True):
-            forecast_start_date = st.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2024-06-01"))
-            forecast_start_time = st.time_input("เวลาเริ่มต้น", value=pd.Timestamp("00:00:00").time())
-            forecast_end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2024-06-02"))
-            forecast_end_time = st.time_input("เวลาสิ้นสุด", value=pd.Timestamp("23:45:00").time())
+        with st.sidebar.expander("เลือกช่วงข้อมูลสำหรับพยากรณ์", expanded=False):
+            forecast_start_date = st.date_input("วันที่เริ่มต้นพยากรณ์", value=pd.to_datetime("2024-06-01"), key='forecast_start_lr')
+            forecast_start_time = st.time_input("เวลาเริ่มต้นพยากรณ์", value=pd.Timestamp("00:00:00").time(), key='forecast_start_time_lr')
+            forecast_end_date = st.date_input("วันที่สิ้นสุดพยากรณ์", value=pd.to_datetime("2024-06-02"), key='forecast_end_lr')
+            forecast_end_time = st.time_input("เวลาสิ้นสุดพยากรณ์", value=pd.Timestamp("23:45:00").time(), key='forecast_end_time_lr')
 
-        # ปุ่มประมวลผล
         process_button2 = st.button("ประมวลผล", type="primary")
 
 # -------------------------------
 # Main content: Display results after file uploads and date selection
 # -------------------------------
 if model_choice == "Random Forest":
-    if 'uploaded_file' in locals() and uploaded_file:
+    if uploaded_file:
         df = pd.read_csv(uploaded_file)
 
         if df.empty:
@@ -703,7 +705,6 @@ if model_choice == "Random Forest":
         st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผล")
 
 elif model_choice == "Linear Regression":
-    # ตรวจสอบว่ามีการอัปโหลดไฟล์สถานีที่ต้องการทำนายหรือไม่
     if uploaded_fill_file:
         # โหลดข้อมูลของสถานีที่ต้องการทำนาย
         try:
@@ -779,43 +780,29 @@ elif model_choice == "Linear Regression":
                                 st.plotly_chart(plot_data_combined(selected_data.set_index('datetime'), forecasted_data, label='สถานีที่ต้องการทำนาย'))
 
                                 # ตรวจสอบและคำนวณค่าความแม่นยำ
-                                common_indices = forecasted_data.index.intersection(target_df.set_index('datetime').index)
+                                mae, rmse, actual_forecasted_data = calculate_error_metrics(
+                                    original=target_df.set_index('datetime').reset_index(),
+                                    forecasted=forecasted_data.reset_index()
+                                )
 
-                                if not common_indices.empty:
-                                    actual_data = target_df.set_index('datetime').loc[common_indices]
-                                    y_true = actual_data['wl_up']
-                                    y_pred = forecasted_data['wl_up'].loc[common_indices]
+                                if actual_forecasted_data is not None:
+                                    st.subheader('ตารางข้อมูลเปรียบเทียบ')
+                                    comparison_table = pd.DataFrame({
+                                        'Datetime': actual_forecasted_data['datetime'],
+                                        'ค่าจริง (ถ้ามี)': actual_forecasted_data['Actual'],
+                                        'ค่าที่พยากรณ์': actual_forecasted_data['Forecasted']
+                                    })
+                                    st.dataframe(comparison_table)
 
-                                    min_length = min(len(y_true), len(y_pred))
-                                    y_true = y_true[:min_length]
-                                    y_pred = y_pred[:min_length]
-
-                                    mae, rmse, actual_forecasted_data = calculate_error_metrics(
-                                        original=target_df.set_index('datetime').reset_index(),
-                                        forecasted=forecasted_data
-                                    )
-
-                                    if actual_forecasted_data is not None:
-                                        st.subheader('ตารางข้อมูลเปรียบเทียบ')
-                                        comparison_table = pd.DataFrame({
-                                            'Datetime': actual_forecasted_data['datetime'],
-                                            'ค่าจริง (ถ้ามี)': actual_forecasted_data['Actual'],
-                                            'ค่าที่พยากรณ์': actual_forecasted_data['Forecasted']
-                                        })
-                                        st.dataframe(comparison_table)
-
-                                        st.write(f"Mean Absolute Error (MAE): {mae:.2f}")
-                                        st.write(f"Root Mean Squared Error (RMSE): {rmse:.2f}")
-                                    else:
-                                        st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่า MAE และ RMSE ได้")
+                                    st.write(f"Mean Absolute Error (MAE): {mae:.2f}")
+                                    st.write(f"Root Mean Squared Error (RMSE): {rmse:.2f}")
                                 else:
                                     st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่า MAE และ RMSE ได้")
                             else:
                                 st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
-        else:
-            st.error("กรุณาอัปโหลดไฟล์ข้อมูลระดับน้ำที่ต้องการทำนาย")
     else:
-        st.info("กรุณาอัปโหลดไฟล์ CSV สำหรับสถานีที่ต้องการทำนาย เพื่อเริ่มต้นการพยากรณ์")
+        st.info("กรุณาอัปโหลดไฟล์ CSV สำหรับเติมข้อมูล เพื่อเริ่มต้นการพยากรณ์")
+
 
 
 
