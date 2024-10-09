@@ -534,102 +534,6 @@ def create_comparison_table(forecasted_data, actual_data):
     return comparison_df
 
 # -------------------------------
-# ฟังก์ชันหลักสำหรับการพยากรณ์ด้วย Linear Regression (สถานีเดียว)
-# -------------------------------
-def main_linear_regression_single(data, start_date, end_date):
-    # สร้างฟีเจอร์เวลา
-    data = create_time_features(data)
-
-    # เตรียมฟีเจอร์
-    data['wl_up_prev'] = data['wl_up'].shift(1)
-    data['wl_up_prev'] = data['wl_up_prev'].interpolate(method='linear')
-
-    # เลือกข้อมูลช่วงวันที่ที่สนใจ
-    selected_data = data[(data['datetime'] >= start_date) & (data['datetime'] <= end_date)].copy()
-
-    # ตรวจสอบว่ามีข้อมูลเพียงพอหรือไม่
-    if selected_data.empty:
-        st.error("ไม่มีข้อมูลในช่วงวันที่ที่เลือก กรุณาเลือกวันที่ใหม่")
-        return
-
-    # กำหนดวันที่เริ่มพยากรณ์เป็นเวลาถัดไปจากข้อมูลที่เลือก
-    forecast_start_date = selected_data['datetime'].max() + pd.Timedelta(minutes=15)
-
-    # พยากรณ์
-    forecasted_data = forecast_with_linear_regression_single(data.set_index('datetime'), forecast_start_date)
-
-    # ตรวจสอบว่ามีการพยากรณ์หรือไม่
-    if not forecasted_data.empty:
-        # คำนวณค่า MAE และ RMSE และดึงข้อมูลจริงสำหรับช่วงพยากรณ์
-        mae, rmse, actual_forecasted_data = calculate_error_metrics(data, forecasted_data)
-
-        # แสดงกราฟข้อมูลพร้อมการพยากรณ์และค่าจริงในช่วงพยากรณ์
-        st.subheader('กราฟข้อมูลระดับน้ำพร้อมการพยากรณ์')
-        st.plotly_chart(plot_data_combined(selected_data.set_index('datetime'), forecasted_data, label='สถานีที่ต้องการทำนาย'))
-
-        # แสดงตารางเปรียบเทียบ
-        if actual_forecasted_data is not None:
-            comparison_table = create_comparison_table(forecasted_data, actual_forecasted_data)
-            st.subheader('ตารางเปรียบเทียบค่าจริงและค่าที่พยากรณ์')
-            st.dataframe(comparison_table)
-            st.write(f"Mean Absolute Error (MAE): {mae:.2f}")
-            st.write(f"Root Mean Squared Error (RMSE): {rmse:.2f}")
-        else:
-            st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถแสดงตารางเปรียบเทียบได้")
-    else:
-        st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
-
-# -------------------------------
-# ฟังก์ชันหลักสำหรับการพยากรณ์ด้วย Linear Regression (สองสถานี)
-# -------------------------------
-def main_linear_regression_two(data, upstream_data, start_date, end_date, delay_hours):
-    # สร้างฟีเจอร์เวลา
-    data = create_time_features(data)
-    upstream_data = create_time_features(upstream_data)
-
-    # เตรียมฟีเจอร์
-    data['wl_up_prev'] = data['wl_up'].shift(1)
-    data['wl_up_prev'] = data['wl_up_prev'].interpolate(method='linear')
-
-    upstream_data['wl_up_prev'] = upstream_data['wl_up'].shift(1)
-    upstream_data['wl_up_prev'] = upstream_data['wl_up_prev'].interpolate(method='linear')
-
-    # เลือกข้อมูลช่วงวันที่ที่สนใจ
-    selected_data = data[(data['datetime'] >= start_date) & (data['datetime'] <= end_date)].copy()
-
-    # ตรวจสอบว่ามีข้อมูลเพียงพอหรือไม่
-    if selected_data.empty:
-        st.error("ไม่มีข้อมูลในช่วงวันที่ที่เลือก กรุณาเลือกวันที่ใหม่")
-        return
-
-    # กำหนดวันที่เริ่มพยากรณ์เป็นเวลาถัดไปจากข้อมูลที่เลือก
-    forecast_start_date = selected_data['datetime'].max() + pd.Timedelta(minutes=15)
-
-    # พยากรณ์
-    forecasted_data = forecast_with_linear_regression_two(data.set_index('datetime'), upstream_data.set_index('datetime'), forecast_start_date, delay_hours)
-
-    # ตรวจสอบว่ามีการพยากรณ์หรือไม่
-    if not forecasted_data.empty:
-        # คำนวณค่า MAE และ RMSE และดึงข้อมูลจริงสำหรับช่วงพยากรณ์
-        mae, rmse, actual_forecasted_data = calculate_error_metrics(data, forecasted_data)
-
-        # แสดงกราฟข้อมูลพร้อมการพยากรณ์และค่าจริงในช่วงพยากรณ์
-        st.subheader('กราฟข้อมูลระดับน้ำพร้อมการพยากรณ์')
-        st.plotly_chart(plot_data_combined(selected_data.set_index('datetime'), forecasted_data, label='สถานีที่ต้องการทำนาย'))
-
-        # แสดงตารางเปรียบเทียบ
-        if actual_forecasted_data is not None:
-            comparison_table = create_comparison_table(forecasted_data, actual_forecasted_data)
-            st.subheader('ตารางเปรียบเทียบค่าจริงและค่าที่พยากรณ์')
-            st.dataframe(comparison_table)
-            st.write(f"Mean Absolute Error (MAE): {mae:.2f}")
-            st.write(f"Root Mean Squared Error (RMSE): {rmse:.2f}")
-        else:
-            st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถแสดงตารางเปรียบเทียบได้")
-    else:
-        st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
-
-# -------------------------------
 # Streamlit UI
 # -------------------------------
 st.set_page_config(
@@ -688,30 +592,34 @@ with st.sidebar:
         process_button = st.button("ประมวลผล", type="primary")
 
     elif model_choice == "Linear Regression":
-        with st.sidebar.expander("ตั้งค่า Linear Regression", expanded=False):
-            uploaded_target_file = st.file_uploader("อัปโหลดไฟล์ CSV ของสถานีที่ต้องการทำนาย", type="csv")
+        st.sidebar.title("ตั้งค่า Linear Regression")
         
-        with st.sidebar.expander("ตั้งค่าพยากรณ์", expanded=False):
-            forecast_start_date = st.date_input("เลือกวันเริ่มต้นพยากรณ์", value=pd.to_datetime("2024-06-01"))
-            forecast_start_time = st.time_input("เลือกเวลาเริ่มต้นพยากรณ์", value=pd.Timestamp("00:00:00").time())
-            forecast_end_date = st.date_input("เลือกวันสิ้นสุดพยากรณ์", value=pd.to_datetime("2024-06-02"))
-            forecast_end_time = st.time_input("เลือกเวลาสิ้นสุดพยากรณ์", value=pd.Timestamp("23:45:00").time())
-            delay_hours = st.number_input("ระบุชั่วโมงหน่วงเวลาสำหรับสถานี upstream", value=0, min_value=0)
+        # อัปโหลดไฟล์สถานีที่ต้องการทำนาย
+        uploaded_fill_file = st.file_uploader("อัปโหลดไฟล์ CSV สำหรับเติมข้อมูล", type="csv")
+        
+        # กล่องติ๊กเลือกสถานีใกล้เคียง
+        use_upstream = st.checkbox("ต้องการใช้สถานีใกล้เคียง", value=False)
+        
+        if use_upstream:
+            # ถ้าติ๊กเลือกให้ใช้สถานีใกล้เคียง อัปโหลดไฟล์สถานีข้างบน
+            uploaded_up_file = st.file_uploader("อัปโหลดไฟล์ CSV ของสถานีข้างบน (upstream)", type="csv")
+            delay_hours = st.number_input("ระบุชั่วโมงหน่วงเวลาสำหรับการเชื่อมโยงข้อมูลจากสถานี upstream", value=0, min_value=0)
 
-            use_second_file_lr = st.checkbox("ต้องการใช้สถานีใกล้เคียง", value=False)
+        # เลือกช่วงวันที่และเวลาสำหรับการพยากรณ์
+        with st.sidebar.expander("เลือกช่วงวันสำหรับพยากรณ์", expanded=True):
+            forecast_start_date = st.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2024-06-01"))
+            forecast_start_time = st.time_input("เวลาเริ่มต้น", value=pd.Timestamp("00:00:00").time())
+            forecast_end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2024-06-02"))
+            forecast_end_time = st.time_input("เวลาสิ้นสุด", value=pd.Timestamp("23:45:00").time())
 
-            if use_second_file_lr:
-                uploaded_file2_lr = st.file_uploader("อัปโหลดไฟล์ CSV ของสถานีใกล้เคียง", type="csv", key="uploader2_lr")
-            else:
-                uploaded_file2_lr = None
-
+        # ปุ่มประมวลผล
         process_button2 = st.button("ประมวลผล", type="primary")
 
 # -------------------------------
 # Main content: Display results after file uploads and date selection
 # -------------------------------
 if model_choice == "Random Forest":
-    if uploaded_file:
+    if 'uploaded_file' in locals() and uploaded_file:
         df = pd.read_csv(uploaded_file)
 
         if df.empty:
@@ -796,13 +704,15 @@ if model_choice == "Random Forest":
 
 elif model_choice == "Linear Regression":
     # ตรวจสอบว่ามีการอัปโหลดไฟล์สถานีที่ต้องการทำนายหรือไม่
-    if uploaded_target_file:
+    if uploaded_fill_file:
         # โหลดข้อมูลของสถานีที่ต้องการทำนาย
-        target_df = pd.read_csv(uploaded_target_file)
+        try:
+            target_df = pd.read_csv(uploaded_fill_file)
+        except Exception as e:
+            st.error(f"เกิดข้อผิดพลาดในการโหลดไฟล์: {e}")
+            target_df = None
 
-        if target_df.empty:
-            st.error("ไฟล์ CSV สถานีที่ต้องการทำนายว่างเปล่า กรุณาอัปโหลดไฟล์ที่มีข้อมูล")
-        else:
+        if target_df is not None:
             target_df = clean_data(target_df)
             target_df = generate_missing_dates(target_df)
             target_df = create_time_features(target_df)
@@ -810,12 +720,14 @@ elif model_choice == "Linear Regression":
             target_df['wl_up_prev'] = target_df['wl_up_prev'].interpolate(method='linear')
 
             # โหลดข้อมูลสถานีใกล้เคียงถ้าเลือกใช้
-            if use_second_file_lr and uploaded_file2_lr:
-                upstream_df = pd.read_csv(uploaded_file2_lr)
-                if upstream_df.empty:
-                    st.error("ไฟล์ CSV สถานีใกล้เคียงว่างเปล่า กรุณาอัปโหลดไฟล์ที่มีข้อมูล")
+            if use_upstream and uploaded_up_file:
+                try:
+                    upstream_df = pd.read_csv(uploaded_up_file)
+                except Exception as e:
+                    st.error(f"เกิดข้อผิดพลาดในการโหลดไฟล์สถานีข้างบน: {e}")
                     upstream_df = None
-                else:
+
+                if upstream_df is not None:
                     upstream_df = clean_data(upstream_df)
                     upstream_df = generate_missing_dates(upstream_df)
                     upstream_df = create_time_features(upstream_df)
@@ -847,7 +759,7 @@ elif model_choice == "Linear Regression":
                         else:
                             forecast_start_date_actual = selected_data['datetime'].max() + pd.Timedelta(minutes=15)
 
-                            if use_second_file_lr and upstream_df is not None:
+                            if use_upstream and upstream_df is not None:
                                 # พยากรณ์ด้วย Linear Regression (สองสถานี)
                                 forecasted_data = forecast_with_linear_regression_two(
                                     data=target_df.set_index('datetime'),
@@ -867,11 +779,7 @@ elif model_choice == "Linear Regression":
                                 st.plotly_chart(plot_data_combined(selected_data.set_index('datetime'), forecasted_data, label='สถานีที่ต้องการทำนาย'))
 
                                 # ตรวจสอบและคำนวณค่าความแม่นยำ
-                                if use_second_file_lr and upstream_df is not None:
-                                    # สำหรับสองสถานี, ตัดสินใจเกี่ยวกับการเปรียบเทียบ
-                                    common_indices = forecasted_data.index.intersection(target_df.set_index('datetime').index)
-                                else:
-                                    common_indices = forecasted_data.index.intersection(target_df.set_index('datetime').index)
+                                common_indices = forecasted_data.index.intersection(target_df.set_index('datetime').index)
 
                                 if not common_indices.empty:
                                     actual_data = target_df.set_index('datetime').loc[common_indices]
@@ -883,7 +791,7 @@ elif model_choice == "Linear Regression":
                                     y_pred = y_pred[:min_length]
 
                                     mae, rmse, actual_forecasted_data = calculate_error_metrics(
-                                        original=target_df.set_index('datetime'),
+                                        original=target_df.set_index('datetime').reset_index(),
                                         forecasted=forecasted_data
                                     )
 
@@ -904,7 +812,11 @@ elif model_choice == "Linear Regression":
                                     st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่า MAE และ RMSE ได้")
                             else:
                                 st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
+        else:
+            st.error("กรุณาอัปโหลดไฟล์ข้อมูลระดับน้ำที่ต้องการทำนาย")
     else:
         st.info("กรุณาอัปโหลดไฟล์ CSV สำหรับสถานีที่ต้องการทำนาย เพื่อเริ่มต้นการพยากรณ์")
+
+
 
 
