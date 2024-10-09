@@ -71,6 +71,12 @@ def train_and_evaluate_model(X, y, model_type='linear_regression'):
     for train_index, test_index in tscv.split(X):
         X_train_cv, X_test_cv = X.iloc[train_index], X.iloc[test_index]
         y_train_cv, y_test_cv = y.iloc[train_index], y.iloc[test_index]
+        
+        # ตรวจสอบและเติมค่า NaN ใน X_train_cv และ y_train_cv
+        if X_train_cv.isnull().values.any() or y_train_cv.isnull().values.any():
+            st.error("พบค่า NaN ในชุดข้อมูลฝึกโมเดล")
+            return None
+        
         model.fit(X_train_cv, y_train_cv)
         y_pred_cv = model.predict(X_test_cv)
         mae = mean_absolute_error(y_test_cv, y_pred_cv)
@@ -79,6 +85,11 @@ def train_and_evaluate_model(X, y, model_type='linear_regression'):
     st.write(f"Mean Absolute Error (MAE) จาก Cross-Validation: {np.mean(scores):.2f}")
     
     # ฝึกโมเดลด้วยข้อมูลทั้งหมด
+    # ตรวจสอบและเติมค่า NaN ใน X และ y
+    if X.isnull().values.any() or y.isnull().values.any():
+        st.error("พบค่า NaN ในชุดข้อมูลทั้งหมด")
+        return None
+    
     model.fit(X, y)
     return model
 
@@ -110,6 +121,12 @@ def handle_missing_values(data_clean, model, feature_cols):
 
     for idx in forecasted_indices:
         row = data.loc[idx, feature_cols].values.reshape(1, -1)
+        # ตรวจสอบว่ามีค่า NaN ในฟีเจอร์หรือไม่
+        if np.isnan(row).any() or np.isinf(row).any():
+            st.warning(f"พบค่า NaN หรือ Inf ในฟีเจอร์ของแถว {idx}, ใช้ค่าเฉลี่ยแทน")
+            row = np.where(np.isnan(row) | np.isinf(row), np.nanmean(row), row)
+            row = np.nan_to_num(row, nan=np.nanmean(row))
+        
         predicted_value = model.predict(row)[0]
         data.at[idx, 'wl_forecast'] = predicted_value
         data.at[idx, 'wl_up'] = predicted_value  # เติมค่าพยากรณ์ลงใน 'wl_up' เพื่อใช้ในการพยากรณ์ครั้งถัดไป
@@ -207,6 +224,11 @@ def forecast_with_linear_regression_single(data, forecast_start_date):
     X_train = training_data[feature_cols]
     y_train = training_data['wl_up']
 
+    # ตรวจสอบว่าข้อมูลไม่มีค่า NaN หรือ Inf
+    if X_train.isnull().values.any() or y_train.isnull().values.any():
+        st.error("พบค่า NaN ในชุดข้อมูลฝึกโมเดล")
+        return pd.DataFrame()
+
     # เทรนโมเดล Linear Regression
     model = LinearRegression()
     model.fit(X_train, y_train)
@@ -232,6 +254,12 @@ def forecast_with_linear_regression_single(data, forecast_start_date):
             lag_features[f'lag_{lag}'] = lag_value
 
         X_pred = pd.DataFrame([lag_features])
+        # ตรวจสอบว่า X_pred ไม่มี NaN หรือ Inf
+        if np.isnan(X_pred).any() or np.isinf(X_pred).any():
+            st.warning(f"พบค่า NaN หรือ Inf ในฟีเจอร์ของแถว {idx}, ใช้ค่าเฉลี่ยแทน")
+            X_pred = X_pred.fillna(y_train.mean())
+            X_pred = X_pred.replace([np.inf, -np.inf], y_train.mean())
+
         forecast_value = model.predict(X_pred)[0]
         forecasted_data.at[idx, 'wl_up'] = forecast_value
 
@@ -289,6 +317,11 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
     X_train = training_data[feature_cols]
     y_train = training_data['wl_up']
 
+    # ตรวจสอบว่าข้อมูลไม่มีค่า NaN หรือ Inf
+    if X_train.isnull().values.any() or y_train.isnull().values.any():
+        st.error("พบค่า NaN ในชุดข้อมูลฝึกโมเดล")
+        return pd.DataFrame()
+
     # เทรนโมเดล Linear Regression
     model = LinearRegression()
     model.fit(X_train, y_train)
@@ -325,6 +358,12 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
                 lag_features[f'lag_{lag}_upstream'] = lag_value_upstream
 
         X_pred = pd.DataFrame([lag_features])
+        # ตรวจสอบว่า X_pred ไม่มี NaN หรือ Inf
+        if np.isnan(X_pred).any() or np.isinf(X_pred).any():
+            st.warning(f"พบค่า NaN หรือ Inf ในฟีเจอร์ของแถว {idx}, ใช้ค่าเฉลี่ยแทน")
+            X_pred = X_pred.fillna(y_train.mean())
+            X_pred = X_pred.replace([np.inf, -np.inf], y_train.mean())
+
         forecast_value = model.predict(X_pred)[0]
         forecasted_data.at[idx, 'wl_up'] = forecast_value
 
@@ -440,6 +479,9 @@ if model_choice == "Linear Regression":
                 target_df['wl_up_prev'] = target_df['wl_up'].shift(1)
                 target_df['wl_up_prev'] = target_df['wl_up_prev'].interpolate(method='linear')
 
+                # ตรวจสอบและเติมค่า NaN ใน 'wl_up_prev'
+                target_df['wl_up_prev'].fillna(target_df['wl_up_prev'].mean(), inplace=True)
+
                 # โหลดข้อมูลสถานีใกล้เคียงถ้าเลือกใช้
                 if use_upstream and uploaded_up_file:
                     try:
@@ -462,6 +504,8 @@ if model_choice == "Linear Regression":
                             upstream_df = create_time_features(upstream_df)
                             upstream_df['wl_up_prev'] = upstream_df['wl_up'].shift(1)
                             upstream_df['wl_up_prev'] = upstream_df['wl_up_prev'].interpolate(method='linear')
+                            # ตรวจสอบและเติมค่า NaN ใน 'wl_up_prev'
+                            upstream_df['wl_up_prev'].fillna(upstream_df['wl_up_prev'].mean(), inplace=True)
                 else:
                     upstream_df = None
 
@@ -544,6 +588,7 @@ if model_choice == "Linear Regression":
                                     st.error("ไม่สามารถฝึกโมเดลได้ กรุณาตรวจสอบข้อมูล")
     else:
         st.info("กรุณาอัปโหลดไฟล์ CSV สำหรับเติมข้อมูล เพื่อเริ่มต้นการพยากรณ์")
+
 
 
 
