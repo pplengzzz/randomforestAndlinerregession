@@ -4,7 +4,7 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import mean_squared_error, mean_absolute_error
-import plotly.express as px
+import plotly.graph_objects as go
 
 # -------------------------------
 # ฟังก์ชันสำหรับการทำความสะอาดข้อมูล
@@ -339,18 +339,35 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
 # ฟังก์ชันสำหรับการแสดงกราฟข้อมูลพร้อมการพยากรณ์
 # -------------------------------
 def plot_data_combined(original_data, forecasted=None, label='ระดับน้ำ'):
-    fig = px.line(original_data, x='datetime', y='wl_up', name='ค่าจริง', title=f'ระดับน้ำที่สถานี {label}')
-    
+    fig = go.Figure()
+
+    # เพิ่มกราฟค่าจริง
+    fig.add_trace(go.Scatter(
+        x=original_data['datetime'],
+        y=original_data['wl_up'],
+        mode='lines',
+        name='ค่าจริง',
+        line=dict(color='blue')
+    ))
+
+    # เพิ่มกราฟค่าที่พยากรณ์
     if forecasted is not None and not forecasted.empty:
-        fig.add_trace(px.line(forecasted, x=forecasted.index, y='wl_up', name='ค่าที่พยากรณ์').data[0])
-    
+        fig.add_trace(go.Scatter(
+            x=forecasted.index,
+            y=forecasted['wl_up'],
+            mode='lines',
+            name='ค่าที่พยากรณ์',
+            line=dict(color='red')
+        ))
+
     fig.update_layout(
+        title=f'ระดับน้ำที่สถานี {label}',
         xaxis_title="วันที่",
         yaxis_title="ระดับน้ำ (wl_up)",
         legend_title="ประเภทข้อมูล",
         hovermode="x unified"
     )
-    
+
     st.plotly_chart(fig, use_container_width=True)
 
 # -------------------------------
@@ -527,6 +544,7 @@ if model_choice == "Linear Regression":
                                     st.error("ไม่สามารถฝึกโมเดลได้ กรุณาตรวจสอบข้อมูล")
     else:
         st.info("กรุณาอัปโหลดไฟล์ CSV สำหรับเติมข้อมูล เพื่อเริ่มต้นการพยากรณ์")
+
 
 
 
