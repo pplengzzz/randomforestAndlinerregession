@@ -54,7 +54,7 @@ def prepare_features(data_clean):
 # ฟังก์ชันสำหรับการฝึกและประเมินโมเดล
 # -------------------------------
 def train_and_evaluate_model(X, y, model_type='random_forest'):
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
 
     if model_type == 'random_forest':
         model = train_random_forest(X_train, y_train)
@@ -195,30 +195,40 @@ def delete_data_by_date_range(data, delete_start_date, delete_end_date):
 # -------------------------------
 # ฟังก์ชันสำหรับการคำนวณค่าความแม่นยำ
 # -------------------------------
-def calculate_accuracy_metrics(original, filled):
-    merged_data = pd.merge(original[['datetime', 'wl_up']], filled[['datetime', 'wl_up2']], on='datetime')
+def calculate_error_metrics(original, forecasted):
+    """
+    คำนวณค่า MAE และ RMSE ระหว่างข้อมูลจริงและข้อมูลที่พยากรณ์
+    Args:
+        original (pd.DataFrame): ข้อมูลจริงที่มีคอลัมน์ 'datetime' และ 'wl_up'
+        forecasted (pd.DataFrame): ข้อมูลพยากรณ์ที่มี index เป็น 'datetime' และคอลัมน์ 'wl_up'
+    Returns:
+        mae (float): ค่า Mean Absolute Error
+        rmse (float): ค่า Root Mean Squared Error
+        actual_forecasted_data (pd.DataFrame): ข้อมูลจริงที่ตรงกับช่วงเวลาการพยากรณ์
+    """
+    # เปลี่ยน index ของ forecasted เป็น 'datetime' หากยังไม่ใช่
+    if forecasted.index.name != 'datetime':
+        forecasted = forecasted.reset_index().rename(columns={'index': 'datetime'})
 
-    merged_data = merged_data.dropna(subset=['wl_up', 'wl_up2'])
+    # รวมข้อมูลจริงและพยากรณ์
+    merged = pd.merge(original[['datetime', 'wl_up']], forecasted[['datetime', 'wl_up']], on='datetime', how='inner', suffixes=('_actual', '_forecasted'))
 
-    comparison_data = merged_data[merged_data['wl_up2'] != merged_data['wl_up']]
+    # ลบแถวที่มีค่า NaN
+    merged = merged.dropna(subset=['wl_up_actual', 'wl_up_forecasted'])
 
-    if comparison_data.empty:
-        st.header("ผลค่าความแม่นยำ", divider='gray')
-        st.info("ไม่สามารถคำนวณความแม่นยำได้เนื่องจากไม่มีค่าจริงให้เปรียบเทียบ")
-    else:
-        mse = mean_squared_error(comparison_data['wl_up'], comparison_data['wl_up2'])
-        mae = mean_absolute_error(comparison_data['wl_up'], comparison_data['wl_up2'])
-        r2 = r2_score(comparison_data['wl_up'], comparison_data['wl_up2'])
+    if merged.empty:
+        st.warning("ไม่มีข้อมูลที่ตรงกันสำหรับการคำนวณค่าความแม่นยำ")
+        return None, None, None
 
-        st.header("ผลค่าความแม่นยำ", divider='gray')
+    # คำนวณ MAE และ RMSE
+    mae = mean_absolute_error(merged['wl_up_actual'], merged['wl_up_forecasted'])
+    rmse = mean_squared_error(merged['wl_up_actual'], merged['wl_up_forecasted'], squared=False)
 
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric(label="Mean Squared Error (MSE)", value=f"{mse:.4f}")
-        with col2:
-            st.metric(label="Mean Absolute Error (MAE)", value=f"{mae:.4f}")
-        with col3:
-            st.metric(label="R-squared (R²)", value=f"{r2:.4f}")
+    # คืนค่าข้อมูลจริงที่ใช้ในการเปรียบเทียบ
+    actual_forecasted_data = merged[['datetime', 'wl_up_actual', 'wl_up_forecasted']].copy()
+    actual_forecasted_data.rename(columns={'wl_up_actual': 'Actual', 'wl_up_forecasted': 'Forecasted'}, inplace=True)
+
+    return mae, rmse, actual_forecasted_data
 
 # -------------------------------
 # ฟังก์ชันสำหรับการแสดงผลลัพธ์
@@ -265,7 +275,7 @@ def plot_results(data_before, data_filled, data_deleted):
         st.header("ผลค่าความแม่นยำ", divider='gray')
         st.info("ไม่สามารถคำนวณความแม่นยำได้เนื่องจากไม่มีค่าจริงให้เปรียบเทียบ")
     else:
-        calculate_accuracy_metrics(data_before, data_filled)
+        calculate_error_metrics(data_before, data_filled)
 
 # -------------------------------
 # ฟังก์ชันสำหรับการแสดงตัวอย่างข้อมูล
@@ -461,29 +471,33 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
         lag_features = {}
         for lag in lags:
             lag_time = idx - pd.Timedelta(minutes=15 * lag)
+            # ดึงค่าจากข้อมูลจริงหรือค่าที่พยากรณ์ก่อนหน้า
             if lag_time in data.index:
                 lag_value = data.at[lag_time, 'wl_up']
                 if not upstream_data.empty:
                     lag_value_upstream = upstream_data.at[lag_time, 'wl_up'] if lag_time in upstream_data.index else np.nan
-                else:
-                    lag_value_upstream = np.nan
             elif lag_time in forecasted_data.index:
                 lag_value = forecasted_data.at[lag_time, 'wl_up']
                 if not upstream_data.empty:
                     lag_value_upstream = forecasted_data.at[lag_time, 'wl_up'] if lag_time in upstream_data.index else np.nan
-                else:
-                    lag_value_upstream = np.nan
             else:
                 lag_value = np.nan
-                lag_value_upstream = np.nan
+                if not upstream_data.empty:
+                    lag_value_upstream = np.nan
+                else:
+                    lag_value_upstream = None
 
             lag_features[f'lag_{lag}'] = lag_value
             if not upstream_data.empty:
                 lag_features[f'lag_{lag}_upstream'] = lag_value_upstream
 
         # ถ้ามีค่า lag ที่หายไป ให้ข้ามการพยากรณ์
-        if np.any(pd.isnull(list(lag_features.values()))):
-            continue
+        if not upstream_data.empty:
+            if np.any(pd.isnull(list(lag_features.values()))):
+                continue
+        else:
+            if np.any(pd.isnull(list(lag_features.values()))):
+                continue
 
         # สร้าง DataFrame สำหรับฟีเจอร์ที่จะใช้ในการพยากรณ์
         X_pred = pd.DataFrame([lag_features])
@@ -513,9 +527,9 @@ def plot_data_combined(data, forecasted=None, label='ระดับน้ำ'):
 # -------------------------------
 def create_comparison_table(forecasted_data, actual_data):
     comparison_df = pd.DataFrame({
-        'Datetime': actual_data.index,
-        'Actual': actual_data['wl_up'],
-        'Forecasted': forecasted_data['wl_up'].loc[actual_data.index]
+        'Datetime': actual_data['datetime'],
+        'Actual': actual_data['wl_up_actual'],
+        'Forecasted': actual_data['wl_up_forecasted']
     })
     return comparison_df
 
@@ -542,7 +556,7 @@ def main_linear_regression_single(data, start_date, end_date):
     forecast_start_date = selected_data['datetime'].max() + pd.Timedelta(minutes=15)
 
     # พยากรณ์
-    forecasted_data = forecast_with_linear_regression_single(data, forecast_start_date)
+    forecasted_data = forecast_with_linear_regression_single(data.set_index('datetime'), forecast_start_date)
 
     # ตรวจสอบว่ามีการพยากรณ์หรือไม่
     if not forecasted_data.empty:
@@ -592,7 +606,7 @@ def main_linear_regression_two(data, upstream_data, start_date, end_date, delay_
     forecast_start_date = selected_data['datetime'].max() + pd.Timedelta(minutes=15)
 
     # พยากรณ์
-    forecasted_data = forecast_with_linear_regression_two(data, upstream_data, forecast_start_date, delay_hours)
+    forecasted_data = forecast_with_linear_regression_two(data.set_index('datetime'), upstream_data.set_index('datetime'), forecast_start_date, delay_hours)
 
     # ตรวจสอบว่ามีการพยากรณ์หรือไม่
     if not forecasted_data.empty:
@@ -743,6 +757,16 @@ if model_choice == "Random Forest":
 
                 df_clean = clean_data(df_filtered)
 
+                # ฟังก์ชัน merge_data ที่ขาดหายไป
+                def merge_data(df_main, df_secondary):
+                    if df_secondary is not None:
+                        merged_df = pd.merge(df_main, df_secondary, on='datetime', how='left', suffixes=('', '_secondary'))
+                        merged_df['wl_up'] = merged_df['wl_up'].fillna(merged_df['wl_up_secondary'])
+                        merged_df = merged_df.drop(columns=['wl_up_secondary'])
+                    else:
+                        merged_df = df_main.copy()
+                    return merged_df
+
                 df_merged = merge_data(df_clean, df2_clean)
 
                 if delete_data_option:
@@ -843,7 +867,12 @@ elif model_choice == "Linear Regression":
                                 st.plotly_chart(plot_data_combined(selected_data.set_index('datetime'), forecasted_data, label='สถานีที่ต้องการทำนาย'))
 
                                 # ตรวจสอบและคำนวณค่าความแม่นยำ
-                                common_indices = forecasted_data.index.intersection(target_df['datetime'])
+                                if use_second_file_lr and upstream_df is not None:
+                                    # สำหรับสองสถานี, ตัดสินใจเกี่ยวกับการเปรียบเทียบ
+                                    common_indices = forecasted_data.index.intersection(target_df.set_index('datetime').index)
+                                else:
+                                    common_indices = forecasted_data.index.intersection(target_df.set_index('datetime').index)
+
                                 if not common_indices.empty:
                                     actual_data = target_df.set_index('datetime').loc[common_indices]
                                     y_true = actual_data['wl_up']
@@ -853,28 +882,27 @@ elif model_choice == "Linear Regression":
                                     y_true = y_true[:min_length]
                                     y_pred = y_pred[:min_length]
 
-                                    mae = mean_absolute_error(y_true, y_pred)
-                                    rmse = mean_squared_error(y_true, y_pred, squared=False)
+                                    mae, rmse, actual_forecasted_data = calculate_error_metrics(
+                                        original=target_df.set_index('datetime'),
+                                        forecasted=forecasted_data
+                                    )
 
-                                    st.subheader('ตารางข้อมูลเปรียบเทียบ')
-                                    comparison_table = pd.DataFrame({
-                                        'Datetime': forecasted_data.index[:min_length],
-                                        'ค่าจริง (ถ้ามี)': y_true.values,
-                                        'ค่าที่พยากรณ์': y_pred.values
-                                    })
-                                    st.dataframe(comparison_table)
+                                    if actual_forecasted_data is not None:
+                                        st.subheader('ตารางข้อมูลเปรียบเทียบ')
+                                        comparison_table = pd.DataFrame({
+                                            'Datetime': actual_forecasted_data['datetime'],
+                                            'ค่าจริง (ถ้ามี)': actual_forecasted_data['Actual'],
+                                            'ค่าที่พยากรณ์': actual_forecasted_data['Forecasted']
+                                        })
+                                        st.dataframe(comparison_table)
 
-                                    st.write(f"Mean Absolute Error (MAE): {mae:.2f}")
-                                    st.write(f"Root Mean Squared Error (RMSE): {rmse:.2f}")
+                                        st.write(f"Mean Absolute Error (MAE): {mae:.2f}")
+                                        st.write(f"Root Mean Squared Error (RMSE): {rmse:.2f}")
+                                    else:
+                                        st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่า MAE และ RMSE ได้")
                                 else:
                                     st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่า MAE และ RMSE ได้")
                             else:
                                 st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
     else:
         st.info("กรุณาอัปโหลดไฟล์ CSV สำหรับสถานีที่ต้องการทำนาย เพื่อเริ่มต้นการพยากรณ์")
-
-
-
-
-
-
