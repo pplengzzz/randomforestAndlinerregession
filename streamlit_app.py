@@ -389,8 +389,7 @@ def forecast_with_linear_regression_single(data, forecast_start_date):
     # สร้าง DataFrame สำหรับการพยากรณ์
     forecast_periods = 96  # พยากรณ์ 1 วัน (96 ช่วงเวลา 15 นาที)
     forecast_index = pd.date_range(start=forecast_start_date, periods=forecast_periods, freq='15T')
-    forecasted_data = pd.DataFrame(index=forecast_index)
-    forecasted_data['wl_up'] = np.nan
+    forecasted_data = pd.DataFrame(index=forecast_index, columns=['wl_up'])
 
     # การพยากรณ์
     for idx in forecasted_data.index:
@@ -399,20 +398,19 @@ def forecast_with_linear_regression_single(data, forecast_start_date):
             lag_time = idx - pd.Timedelta(minutes=15 * lag)
             if lag_time in data.index:
                 lag_value = data.at[lag_time, 'wl_up']
+            elif lag_time in forecasted_data.index and not pd.isnull(forecasted_data.at[lag_time, 'wl_up']):
+                lag_value = forecasted_data.at[lag_time, 'wl_up']
             else:
-                lag_value = np.nan
+                # ถ้าไม่มีค่า lag ให้ใช้ค่าเฉลี่ยของ y_train
+                lag_value = y_train.mean()
             lag_features[f'lag_{lag}'] = lag_value
 
-        # ถ้ามีค่า lag ที่หายไป ให้ข้ามการพยากรณ์
-        if np.any(pd.isnull(list(lag_features.values()))):
-            continue
-
-        # สร้าง DataFrame สำหรับฟีเจอร์ที่จะใช้ในการพยากรณ์
         X_pred = pd.DataFrame([lag_features])
-
-        # พยากรณ์ค่า
         forecast_value = model.predict(X_pred)[0]
         forecasted_data.at[idx, 'wl_up'] = forecast_value
+
+        # อัปเดตค่าใน data เพื่อใช้ในการพยากรณ์ครั้งถัดไป
+        data.at[idx, 'wl_up'] = forecast_value
 
     # ลบแถวที่ไม่มีการพยากรณ์
     forecasted_data.dropna(inplace=True)
@@ -427,7 +425,7 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
     if not upstream_data.empty:
         upstream_data = upstream_data.copy()
         if delay_hours > 0:
-            upstream_data = upstream_data.shift(freq=pd.Timedelta(hours=delay_hours))
+            upstream_data.index = upstream_data.index + pd.Timedelta(hours=delay_hours)
 
     # ใช้ข้อมูล 3 วันจากทั้งสองสถานีในการเทรนโมเดล
     training_data_end = forecast_start_date - pd.Timedelta(minutes=15)
@@ -475,48 +473,41 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
     # สร้าง DataFrame สำหรับการพยากรณ์
     forecast_periods = 96  # พยากรณ์ 1 วัน (96 ช่วงเวลา 15 นาที)
     forecast_index = pd.date_range(start=forecast_start_date, periods=forecast_periods, freq='15T')
-    forecasted_data = pd.DataFrame(index=forecast_index)
-    forecasted_data['wl_up'] = np.nan
+    forecasted_data = pd.DataFrame(index=forecast_index, columns=['wl_up'])
 
     # การพยากรณ์
     for idx in forecasted_data.index:
         lag_features = {}
         for lag in lags:
             lag_time = idx - pd.Timedelta(minutes=15 * lag)
-            # ดึงค่าจากข้อมูลจริงหรือค่าที่พยากรณ์ก่อนหน้า
+            # ค่า lag ของสถานีหลัก
             if lag_time in data.index:
                 lag_value = data.at[lag_time, 'wl_up']
-                if not upstream_data.empty:
-                    lag_value_upstream = upstream_data.at[lag_time, 'wl_up'] if lag_time in upstream_data.index else np.nan
-            elif lag_time in forecasted_data.index:
+            elif lag_time in forecasted_data.index and not pd.isnull(forecasted_data.at[lag_time, 'wl_up']):
                 lag_value = forecasted_data.at[lag_time, 'wl_up']
-                if not upstream_data.empty:
-                    lag_value_upstream = forecasted_data.at[lag_time, 'wl_up'] if lag_time in upstream_data.index else np.nan
             else:
-                lag_value = np.nan
-                if not upstream_data.empty:
-                    lag_value_upstream = np.nan
-                else:
-                    lag_value_upstream = None
-
+                # ถ้าไม่มีค่า lag ให้ใช้ค่าเฉลี่ยของ y_train
+                lag_value = y_train.mean()
             lag_features[f'lag_{lag}'] = lag_value
+
+            # ค่า lag ของ upstream
             if not upstream_data.empty:
+                if lag_time in upstream_data.index:
+                    lag_value_upstream = upstream_data.at[lag_time, 'wl_up']
+                elif lag_time in forecasted_data.index and not pd.isnull(forecasted_data.at[lag_time, 'wl_up']):
+                    lag_value_upstream = forecasted_data.at[lag_time, 'wl_up']
+                else:
+                    lag_value_upstream = y_train.mean()
                 lag_features[f'lag_{lag}_upstream'] = lag_value_upstream
 
-        # ถ้ามีค่า lag ที่หายไป ให้ข้ามการพยากรณ์
-        if not upstream_data.empty:
-            if np.any(pd.isnull(list(lag_features.values()))):
-                continue
-        else:
-            if np.any(pd.isnull(list(lag_features.values()))):
-                continue
-
-        # สร้าง DataFrame สำหรับฟีเจอร์ที่จะใช้ในการพยากรณ์
         X_pred = pd.DataFrame([lag_features])
-
-        # พยากรณ์ค่า
         forecast_value = model.predict(X_pred)[0]
         forecasted_data.at[idx, 'wl_up'] = forecast_value
+
+        # อัปเดตค่าใน data เพื่อใช้ในการพยากรณ์ครั้งถัดไป
+        data.at[idx, 'wl_up'] = forecast_value
+        if not upstream_data.empty:
+            upstream_data.at[idx, 'wl_up'] = lag_features.get(f'lag_{lag}_upstream', y_train.mean())
 
     # ลบแถวที่ไม่มีการพยากรณ์
     forecasted_data.dropna(inplace=True)
@@ -835,6 +826,7 @@ elif model_choice == "Linear Regression":
                                     st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
     else:
         st.info("กรุณาอัปโหลดไฟล์ CSV สำหรับเติมข้อมูล เพื่อเริ่มต้นการพยากรณ์")
+
 
 
 
