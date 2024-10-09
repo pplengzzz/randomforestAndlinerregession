@@ -19,13 +19,37 @@ def clean_data(data):
     data['datetime'] = data['datetime'].dt.tz_localize(None)
     data.set_index('datetime', inplace=True)
 
-    # ลบข้อมูลที่มีค่า wl_up น้อยกว่า 100
+    # ตรวจสอบว่ามีคอลัมน์ 'wl_up' หรือไม่
     if 'wl_up' not in data.columns:
         st.error("คอลัมน์ 'wl_up' ไม่พบในข้อมูล กรุณาตรวจสอบไฟล์ CSV")
         return pd.DataFrame()
     
+    # ลบข้อมูลที่มีค่า wl_up น้อยกว่า 100
     data = data[data['wl_up'] >= 100]
     return data
+
+# -------------------------------
+# ฟังก์ชันสำหรับการเติมข้อมูลวันที่ที่ขาดหายไป
+# -------------------------------
+def generate_missing_dates(data):
+    """
+    ฟังก์ชันสำหรับสร้างข้อมูลวันที่ที่ขาดหายไปในชุดข้อมูล
+    """
+    full_index = pd.date_range(start=data.index.min(), end=data.index.max(), freq='15T')
+    data = data.reindex(full_index)
+    data['wl_up'] = data['wl_up'].interpolate(method='linear')
+    return data
+
+# -------------------------------
+# ฟังก์ชันสำหรับการสร้างฟีเจอร์เวลาเพิ่มเติม
+# -------------------------------
+def create_time_features(df):
+    """
+    ฟังก์ชันสำหรับสร้างฟีเจอร์เวลาเพิ่มเติม เช่น ชั่วโมงของวัน วันของสัปดาห์ เป็นต้น
+    """
+    df['hour'] = df.index.hour
+    df['day_of_week'] = df.index.dayofweek
+    return df
 
 # -------------------------------
 # ฟังก์ชันสำหรับการแสดงกราฟข้อมูล
@@ -34,6 +58,10 @@ def plot_data_combined(original_data, forecasted=None, actual_forecasted=None, l
     """
     ฟังก์ชันสำหรับการแสดงกราฟข้อมูลจริงและค่าที่พยากรณ์
     """
+    if 'wl_up' not in original_data.columns:
+        st.error(f"คอลัมน์ 'wl_up' ไม่พบในข้อมูล {label}")
+        return
+
     fig = px.line(original_data, x=original_data.index, y='wl_up', title='ระดับน้ำตามเวลา',
                   labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'}, name=label, color_discrete_sequence=['blue'])
     
@@ -215,43 +243,6 @@ def calculate_error_metrics(data, forecasted_data):
         return None, None, None
 
 # --------------------------------------------
-# ฟังก์ชันสำหรับการสร้างตารางเปรียบเทียบ
-# --------------------------------------------
-def create_comparison_table(forecasted_data, actual_data):
-    """
-    ฟังก์ชันสำหรับการสร้างตารางเปรียบเทียบค่าจริงและค่าที่พยากรณ์
-    """
-    comparison_df = pd.DataFrame({
-        'Datetime': actual_data.index,
-        'ค่าจริง': actual_data['wl_up'],
-        'ค่าที่พยากรณ์': forecasted_data['wl_up'].loc[actual_data.index]
-    })
-    return comparison_df
-
-# --------------------------------------------
-# ฟังก์ชันสำหรับการเติมข้อมูลวันที่ที่ขาดหายไป
-# --------------------------------------------
-def generate_missing_dates(data):
-    """
-    ฟังก์ชันสำหรับสร้างข้อมูลวันที่ที่ขาดหายไปในชุดข้อมูล
-    """
-    full_index = pd.date_range(start=data.index.min(), end=data.index.max(), freq='15T')
-    data = data.reindex(full_index)
-    data['wl_up'] = data['wl_up'].interpolate(method='linear')
-    return data
-
-# --------------------------------------------
-# ฟังก์ชันสำหรับการสร้างฟีเจอร์เวลาเพิ่มเติม
-# --------------------------------------------
-def create_time_features(df):
-    """
-    ฟังก์ชันสำหรับสร้างฟีเจอร์เวลาเพิ่มเติม เช่น ชั่วโมงของวัน วันของสัปดาห์ เป็นต้น
-    """
-    df['hour'] = df.index.hour
-    df['day_of_week'] = df.index.dayofweek
-    return df
-
-# --------------------------------------------
 # ส่วนหลักของโปรแกรม Streamlit
 # --------------------------------------------
 def main():
@@ -389,10 +380,6 @@ def main():
                                 )
 
                                 if actual_forecasted_data is not None:
-                                    st.subheader('ตารางข้อมูลเปรียบเทียบ')
-                                    comparison_table = create_comparison_table(forecasted_data, actual_forecasted_data)
-                                    st.dataframe(comparison_table)
-
                                     st.write(f"Mean Absolute Error (MAE): {mae:.2f}")
                                     st.write(f"Root Mean Squared Error (RMSE): {rmse:.2f}")
                                 else:
@@ -405,6 +392,7 @@ def main():
 # เรียกใช้ฟังก์ชันหลัก
 if __name__ == "__main__":
     main()
+
 
 
 
