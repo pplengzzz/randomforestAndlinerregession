@@ -11,30 +11,75 @@ def load_and_clean_data(file):
         data = pd.read_csv(file)
         data['datetime'] = pd.to_datetime(data['datetime'])
         data.set_index('datetime', inplace=True)
-        data = data[data['wl_up'] >= 100]  # ลบข้อมูลที่ wl_up ต่ำกว่า 100
+        data = data[data['wl_up'] >= 100]  # ลบข้อมูลที่มีค่า wl_up ต่ำกว่า 100
         return data
     except Exception as e:
-        st.error(f"ไม่สามารถโหลดไฟล์ได้: {e}")
+        st.error(f"ไม่สามารถโหลดข้อมูลได้: {e}")
         return None
 
-# ฟังก์ชันสำหรับเลื่อนข้อมูลสถานีข้างบนตามชั่วโมงที่กำหนด
-def shift_upstream_data(upstream_data, delay_hours):
-    upstream_data_shifted = upstream_data.copy()
-    upstream_data_shifted.index = upstream_data_shifted.index + pd.Timedelta(hours=delay_hours)
-    return upstream_data_shifted
-
-# ฟังก์ชันสำหรับ Linear Regression เพื่อเติมค่าและพยากรณ์
-def forecast_with_linear_regression(data, upstream_data, forecast_start_date, delay_hours):
-    upstream_data = shift_upstream_data(upstream_data, delay_hours)
-    
-    # เทรนโมเดลด้วยข้อมูลย้อนหลัง 3 วัน
+# ------------------------ Linear Regression: ใช้สถานีตัวเอง (Colab ข้อ 1) ------------------------
+def forecast_with_self_station(data, forecast_start_date):
     training_data_end = forecast_start_date - pd.Timedelta(minutes=15)
     training_data_start = training_data_end - pd.Timedelta(days=3) + pd.Timedelta(minutes=15)
-    
+
     if training_data_start < data.index.min():
         st.error("ข้อมูลไม่เพียงพอสำหรับการเทรน")
         return pd.DataFrame()
-    
+
+    # สร้างฟีเจอร์ lag
+    training_data = data.loc[training_data_start:training_data_end].copy()
+    lags = [1, 4, 96, 192]  # lag 15 นาที, 1 ชั่วโมง, 1 วัน, 2 วัน
+    for lag in lags:
+        training_data[f'lag_{lag}'] = training_data['wl_up'].shift(lag)
+
+    training_data.dropna(inplace=True)
+
+    if training_data.empty:
+        st.error("ข้อมูลไม่เพียงพอหลังจากสร้างฟีเจอร์ lag")
+        return pd.DataFrame()
+
+    X_train = training_data[[f'lag_{lag}' for lag in lags]]
+    y_train = training_data['wl_up']
+
+    model = LinearRegression()
+    model.fit(X_train, y_train)
+
+    # พยากรณ์ล่วงหน้า 1 วัน (96 ช่วงเวลา, 15 นาทีต่อครั้ง)
+    forecast_periods = 96
+    forecast_index = pd.date_range(start=forecast_start_date, periods=forecast_periods, freq='15T')
+    forecasted_data = pd.DataFrame(index=forecast_index)
+    forecasted_data['wl_up'] = np.nan
+
+    for idx in forecasted_data.index:
+        lag_features = {}
+        for lag in lags:
+            lag_time = idx - pd.Timedelta(minutes=15 * lag)
+            if lag_time in data.index:
+                lag_value = data.at[lag_time, 'wl_up']
+            else:
+                lag_value = np.nan
+            lag_features[f'lag_{lag}'] = lag_value
+
+        X_pred = pd.DataFrame([lag_features])
+        if not X_pred.isnull().values.any():
+            forecast_value = model.predict(X_pred)[0]
+            forecasted_data.at[idx, 'wl_up'] = forecast_value
+
+    forecasted_data.dropna(inplace=True)
+    return forecasted_data
+
+# ------------------------ Linear Regression: ใช้สถานีข้างบน (Colab ข้อ 2) ------------------------
+def forecast_with_upstream_station(data, upstream_data, forecast_start_date, delay_hours):
+    upstream_data = shift_upstream_data(upstream_data, delay_hours)
+
+    # เทรนโมเดลด้วยข้อมูลย้อนหลัง 3 วัน
+    training_data_end = forecast_start_date - pd.Timedelta(minutes=15)
+    training_data_start = training_data_end - pd.Timedelta(days=3) + pd.Timedelta(minutes=15)
+
+    if training_data_start < data.index.min():
+        st.error("ข้อมูลไม่เพียงพอสำหรับการเทรน")
+        return pd.DataFrame()
+
     # รวมข้อมูลสถานีข้างบนและเลื่อนเวลา
     training_data = data.loc[training_data_start:training_data_end].copy()
     training_data = training_data.join(upstream_data, rsuffix='_upstream')
@@ -44,9 +89,8 @@ def forecast_with_linear_regression(data, upstream_data, forecast_start_date, de
     for lag in lags:
         training_data[f'lag_{lag}'] = training_data['wl_up'].shift(lag)
         training_data[f'lag_{lag}_upstream'] = training_data['wl_up_upstream'].shift(lag)
-    
-    # ลบข้อมูลที่มี NaN
-    training_data.dropna(subset=[f'lag_{lag}' for lag in lags], inplace=True)
+
+    training_data.dropna(inplace=True)
 
     if training_data.empty:
         st.error("ข้อมูลไม่เพียงพอหลังจากสร้างฟีเจอร์ lag")
@@ -58,7 +102,7 @@ def forecast_with_linear_regression(data, upstream_data, forecast_start_date, de
     model = LinearRegression()
     model.fit(X_train, y_train)
 
-    # พยากรณ์ล่วงหน้า 24 ชั่วโมง (96 ช่วงเวลา, 15 นาทีต่อครั้ง)
+    # พยากรณ์ล่วงหน้า 1 วัน (96 ช่วงเวลา, 15 นาทีต่อครั้ง)
     forecast_periods = 96
     forecast_index = pd.date_range(start=forecast_start_date, periods=forecast_periods, freq='15T')
     forecasted_data = pd.DataFrame(index=forecast_index)
@@ -86,6 +130,12 @@ def forecast_with_linear_regression(data, upstream_data, forecast_start_date, de
     forecasted_data.dropna(inplace=True)
     return forecasted_data
 
+# ฟังก์ชันเลื่อนข้อมูลสถานีข้างบนตามชั่วโมงที่กำหนด
+def shift_upstream_data(upstream_data, delay_hours):
+    upstream_data_shifted = upstream_data.copy()
+    upstream_data_shifted.index = upstream_data_shifted.index + pd.Timedelta(hours=delay_hours)
+    return upstream_data_shifted
+
 # ฟังก์ชันแสดงผลกราฟ
 def plot_data(data, forecasted=None, title="กราฟแสดงระดับน้ำ"):
     fig = px.line(data, x=data.index, y='wl_up', title=title, labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
@@ -93,11 +143,11 @@ def plot_data(data, forecasted=None, title="กราฟแสดงระดั
         fig.add_scatter(x=forecasted.index, y=forecasted['wl_up'], mode='lines', name='ค่าที่พยากรณ์', line=dict(color='red'))
     st.plotly_chart(fig)
 
-# Main Streamlit App
+# ---------------------------------- Main Streamlit App ----------------------------------
+
 st.title("การพยากรณ์ระดับน้ำด้วย Linear Regression")
 
-# Sidebar สำหรับอัปโหลดไฟล์
-st.sidebar.header("อัปโหลดข้อมูล")
+# Sidebar สำหรับอัปโหลดไฟล์และเลือกการทำงาน
 uploaded_target_file = st.sidebar.file_uploader("อัปโหลดไฟล์ CSV สำหรับสถานีที่ต้องการทำนาย", type="csv")
 use_upstream = st.sidebar.checkbox("ใช้ข้อมูลจากสถานีข้างบน", value=False)
 
@@ -116,16 +166,14 @@ if uploaded_target_file:
     # เลือกช่วงวันที่สำหรับพยากรณ์
     st.sidebar.header("เลือกช่วงวันที่สำหรับพยากรณ์")
     start_date = st.sidebar.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2024-06-01"))
-    end_date = st.sidebar.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2024-06-02"))
 
     if st.sidebar.button("ประมวลผลข้อมูล"):
-        forecast_start_date = pd.to_datetime(start_date) + pd.Timedelta(hours=24)  # เริ่มพยากรณ์หลังจาก 24 ชั่วโมง
+        forecast_start_date = pd.to_datetime(start_date) + pd.Timedelta(hours=24)
 
         if use_upstream and upstream_data is not None:
-            forecasted_data = forecast_with_linear_regression(target_data, upstream_data, forecast_start_date, delay_hours)
+            forecasted_data = forecast_with_upstream_station(target_data, upstream_data, forecast_start_date, delay_hours)
             plot_data(target_data, forecasted=forecasted_data, title="การพยากรณ์ระดับน้ำโดยใช้ข้อมูลจากสถานีข้างบน")
         else:
-            st.write("ใช้ข้อมูลสถานีตัวเองในการเติมค่าและพยากรณ์")
-            # คุณสามารถนำโค้ดเติมค่า Linear Regression จากสถานีตัวเองใส่ที่นี่ได้
-else:
-    st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผล")
+            forecasted_data = forecast_with_self_station(target_data, forecast_start_date)
+            plot_data(target_data, forecasted=forecasted_data, title="การพยากรณ์ระดับน้ำโดยใช้ข้อมูลจากสถานีตัวเอง")
+
