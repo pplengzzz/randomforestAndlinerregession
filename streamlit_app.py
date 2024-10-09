@@ -49,8 +49,16 @@ def prepare_features(data_clean):
         'day_of_week', 'day_of_year', 'week_of_year',
         'days_in_month', 'wl_up_prev'
     ]
-    X = data_clean[feature_cols]
-    y = data_clean['wl_up']
+    X = data_clean[feature_cols].copy()
+    y = data_clean['wl_up'].copy()
+    
+    # เติมค่า NaN ในฟีเจอร์ด้วยค่าเฉลี่ยของแต่ละคอลัมน์
+    X.fillna(X.mean(), inplace=True)
+    
+    # ลบแถวที่มีค่า NaN ใน y และปรับ X ให้ตรงกับ y
+    y = y.dropna()
+    X = X.loc[y.index]
+    
     return X, y
 
 # -------------------------------
@@ -127,9 +135,9 @@ def handle_missing_values(data_clean, model, feature_cols):
             row = np.where(np.isnan(row) | np.isinf(row), np.nanmean(row), row)
             row = np.nan_to_num(row, nan=np.nanmean(row))
         
-        predicted_value = model.predict(row)[0]
-        data.at[idx, 'wl_forecast'] = predicted_value
-        data.at[idx, 'wl_up'] = predicted_value  # เติมค่าพยากรณ์ลงใน 'wl_up' เพื่อใช้ในการพยากรณ์ครั้งถัดไป
+        forecast_value = model.predict(row)[0]
+        data.at[idx, 'wl_forecast'] = forecast_value
+        data.at[idx, 'wl_up'] = forecast_value  # เติมค่าพยากรณ์ลงใน 'wl_up' เพื่อใช้ในการพยากรณ์ครั้งถัดไป
 
     data['wl_up2'] = data['wl_up'].combine_first(data['wl_forecast'])
     return data
@@ -254,6 +262,7 @@ def forecast_with_linear_regression_single(data, forecast_start_date):
             lag_features[f'lag_{lag}'] = lag_value
 
         X_pred = pd.DataFrame([lag_features])
+
         # ตรวจสอบว่า X_pred ไม่มี NaN หรือ Inf
         if np.isnan(X_pred).any() or np.isinf(X_pred).any():
             st.warning(f"พบค่า NaN หรือ Inf ในฟีเจอร์ของแถว {idx}, ใช้ค่าเฉลี่ยแทน")
@@ -478,7 +487,6 @@ if model_choice == "Linear Regression":
                 target_df = create_time_features(target_df)
                 target_df['wl_up_prev'] = target_df['wl_up'].shift(1)
                 target_df['wl_up_prev'] = target_df['wl_up_prev'].interpolate(method='linear')
-
                 # ตรวจสอบและเติมค่า NaN ใน 'wl_up_prev'
                 target_df['wl_up_prev'].fillna(target_df['wl_up_prev'].mean(), inplace=True)
 
@@ -511,11 +519,22 @@ if model_choice == "Linear Regression":
 
                 # แสดงกราฟข้อมูล
                 st.subheader('กราฟข้อมูลระดับน้ำ')
-                plot_data_combined(target_df, label='สถานีที่ต้องการทำนาย')
+                plot_data_combined(original_data=target_df, forecasted=None, label='สถานีที่ต้องการทำนาย')
                 if upstream_df is not None and not upstream_df.empty:
-                    plot_data_combined(upstream_df, label='สถานีใกล้เคียง (up)')
+                    plot_data_combined(original_data=upstream_df, forecasted=None, label='สถานีใกล้เคียง (up)')
                 else:
                     st.info("ไม่มีข้อมูลสถานีใกล้เคียง")
+
+                # แสดงข้อมูลตัวอย่างและประเภทข้อมูล
+                st.write("ตัวอย่างข้อมูลหลังการทำความสะอาดและสร้างฟีเจอร์:")
+                st.write(target_df.head())
+                st.write("ประเภทข้อมูลของแต่ละคอลัมน์:")
+                st.write(target_df.dtypes)
+                if upstream_df is not None and not upstream_df.empty:
+                    st.write("ตัวอย่างข้อมูลสถานีใกล้เคียงหลังการทำความสะอาดและสร้างฟีเจอร์:")
+                    st.write(upstream_df.head())
+                    st.write("ประเภทข้อมูลของแต่ละคอลัมน์ในสถานีใกล้เคียง:")
+                    st.write(upstream_df.dtypes)
 
                 if process_button2:
                     with st.spinner("กำลังพยากรณ์..."):
@@ -588,6 +607,7 @@ if model_choice == "Linear Regression":
                                     st.error("ไม่สามารถฝึกโมเดลได้ กรุณาตรวจสอบข้อมูล")
     else:
         st.info("กรุณาอัปโหลดไฟล์ CSV สำหรับเติมข้อมูล เพื่อเริ่มต้นการพยากรณ์")
+
 
 
 
