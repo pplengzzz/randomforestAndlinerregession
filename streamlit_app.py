@@ -118,6 +118,7 @@ def generate_missing_dates(data):
     full_date_range = pd.date_range(start=data['datetime'].min(), end=data['datetime'].max(), freq='15T')
     all_dates = pd.DataFrame(full_date_range, columns=['datetime'])
     data_with_all_dates = pd.merge(all_dates, data, on='datetime', how='left')
+    data_with_all_dates['datetime'] = pd.to_datetime(data_with_all_dates['datetime'], errors='coerce')
     return data_with_all_dates
 
 # -------------------------------
@@ -574,7 +575,7 @@ with st.sidebar:
     if model_choice == "Random Forest":
         with st.sidebar.expander("ตั้งค่า Random Forest", expanded=False):
             use_second_file = st.checkbox("ต้องการใช้สถานีใกล้เคียง", value=False)
-            
+
             if use_second_file:
                 uploaded_file2 = st.file_uploader("ข้อมูลระดับที่ใช้ฝึกโมเดล (สถานีที่ก่อนหน้า)", type="csv", key="uploader2_rf")
                 uploaded_file = st.file_uploader("ข้อมูลระดับน้ำที่ต้องการทำนาย", type="csv", key="uploader1_rf")
@@ -591,7 +592,7 @@ with st.sidebar:
         with st.sidebar.expander("เลือกช่วงข้อมูลสำหรับฝึกโมเดล", expanded=False):
             start_date = st.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2024-05-01"))
             end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2024-05-31"))
-            
+
             delete_data_option = st.checkbox("ต้องการเลือกลบข้อมูล", value=False)
 
             if delete_data_option:
@@ -606,11 +607,11 @@ with st.sidebar:
     elif model_choice == "Linear Regression":
         with st.sidebar.expander("ตั้งค่า Linear Regression", expanded=False):
             use_upstream = st.checkbox("ต้องการใช้สถานีใกล้เคียง", value=False)
-            
+
             if use_upstream:
                 uploaded_up_file = st.file_uploader("อัปโหลดไฟล์ CSV ของสถานีข้างบน (upstream)", type="csv", key="uploader_up_lr")
                 delay_hours = st.number_input("ระบุชั่วโมงหน่วงเวลาสำหรับการเชื่อมโยงข้อมูลจากสถานี upstream", value=0, min_value=0)
-            
+
             uploaded_fill_file = st.file_uploader("อัปโหลดไฟล์ CSV สำหรับเติมข้อมูล", type="csv", key="uploader_fill_lr")
 
         with st.sidebar.expander("เลือกช่วงข้อมูลสำหรับพยากรณ์", expanded=False):
@@ -636,6 +637,7 @@ if model_choice == "Random Forest":
                 st.error("หลังจากการทำความสะอาดข้อมูลแล้วไม่มีข้อมูลที่เหลือ")
             else:
                 df = generate_missing_dates(df)
+                df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce').dt.tz_localize(None)  # แปลงเป็น timezone-naive
 
                 if use_second_file:
                     if uploaded_file2 is not None:
@@ -650,6 +652,7 @@ if model_choice == "Random Forest":
                                 df2 = None
                             else:
                                 df2 = generate_missing_dates(df2)
+                                df2['datetime'] = pd.to_datetime(df2['datetime'], errors='coerce').dt.tz_localize(None)  # แปลงเป็น timezone-naive
                     else:
                         st.warning("กรุณาอัปโหลดไฟล์ที่สอง (สถานีที่ก่อนหน้า)")
                         df2 = None
@@ -662,15 +665,12 @@ if model_choice == "Random Forest":
                     processing_placeholder = st.empty()
                     processing_placeholder.text("กำลังประมวลผลข้อมูล...")
 
-                    df['datetime'] = pd.to_datetime(df['datetime']).dt.tz_localize(None)
-
                     end_date_dt = pd.to_datetime(end_date) + pd.DateOffset(days=1)
 
-                    df_filtered = df[(df['datetime'] >= pd.to_datetime(start_date)) & (df['datetime'] <= pd.to_datetime(end_date_dt))]
+                    df_filtered = df[(df['datetime'] >= pd.to_datetime(start_date)) & (df['datetime'] <= pd.to_datetime(end_date_dt))].copy()
 
                     if use_second_file and uploaded_file2 and df2 is not None:
-                        df2['datetime'] = pd.to_datetime(df2['datetime']).dt.tz_localize(None)
-                        df2_filtered = df2[(df2['datetime'] >= pd.to_datetime(start_date)) & (df2['datetime'] <= pd.to_datetime(end_date_dt))]
+                        df2_filtered = df2[(df2['datetime'] >= pd.to_datetime(start_date)) & (df2['datetime'] <= pd.to_datetime(end_date_dt))].copy()
                         df2_filtered['datetime'] = df2_filtered['datetime'] + total_time_lag
                         df2_clean = clean_data(df2_filtered)
                         if df2_clean.empty:
@@ -704,17 +704,18 @@ if model_choice == "Random Forest":
                     else:
                         df_deleted = df_merged.copy()
 
-                    df_clean = generate_missing_dates(df_deleted)
-                    df_clean = fill_code_column(df_clean)
-                    df_clean = create_time_features(df_clean)
+                    df_deleted = generate_missing_dates(df_deleted)
+                    df_deleted['datetime'] = pd.to_datetime(df_deleted['datetime'], errors='coerce').dt.tz_localize(None)  # แปลงเป็น timezone-naive
+                    df_deleted = fill_code_column(df_deleted)
+                    df_deleted = create_time_features(df_deleted)
 
-                    if 'wl_up_prev' not in df_clean.columns:
-                        df_clean['wl_up_prev'] = df_clean['wl_up'].shift(1)
-                    df_clean['wl_up_prev'] = df_clean['wl_up_prev'].interpolate(method='linear')
+                    if 'wl_up_prev' not in df_deleted.columns:
+                        df_deleted['wl_up_prev'] = df_deleted['wl_up'].shift(1)
+                    df_deleted['wl_up_prev'] = df_deleted['wl_up_prev'].interpolate(method='linear')
 
                     df_before_deletion = df_filtered.copy()
 
-                    df_handled = handle_missing_values_by_week(df_clean, start_date, end_date, model_type='random_forest')
+                    df_handled = handle_missing_values_by_week(df_deleted, start_date, end_date, model_type='random_forest')
 
                     processing_placeholder.empty()
 
@@ -739,6 +740,7 @@ elif model_choice == "Linear Regression":
                 st.error("หลังจากการทำความสะอาดข้อมูลแล้วไม่มีข้อมูลที่เหลือ")
             else:
                 target_df = generate_missing_dates(target_df)
+                target_df['datetime'] = pd.to_datetime(target_df['datetime'], errors='coerce').dt.tz_localize(None)  # แปลงเป็น timezone-naive
                 target_df = create_time_features(target_df)
                 target_df['wl_up_prev'] = target_df['wl_up'].shift(1)
                 target_df['wl_up_prev'] = target_df['wl_up_prev'].interpolate(method='linear')
@@ -761,6 +763,7 @@ elif model_choice == "Linear Regression":
                             upstream_df = pd.DataFrame()
                         else:
                             upstream_df = generate_missing_dates(upstream_df)
+                            upstream_df['datetime'] = pd.to_datetime(upstream_df['datetime'], errors='coerce').dt.tz_localize(None)  # แปลงเป็น timezone-naive
                             upstream_df = create_time_features(upstream_df)
                             upstream_df['wl_up_prev'] = upstream_df['wl_up'].shift(1)
                             upstream_df['wl_up_prev'] = upstream_df['wl_up_prev'].interpolate(method='linear')
@@ -832,6 +835,7 @@ elif model_choice == "Linear Regression":
                                     st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
     else:
         st.info("กรุณาอัปโหลดไฟล์ CSV สำหรับเติมข้อมูล เพื่อเริ่มต้นการพยากรณ์")
+
 
 
 
