@@ -463,6 +463,10 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
         feature_cols = [f'lag_{lag}' for lag in lags] + [f'lag_{lag}_upstream' for lag in lags]
     else:
         feature_cols = [f'lag_{lag}' for lag in lags]
+    
+    # กำหนดเฉพาะฟีเจอร์ที่มีอยู่จริงในข้อมูลการเทรน (เพื่อป้องกันปัญหา mismatch ของฟีเจอร์)
+    feature_cols = [col for col in feature_cols if col in training_data.columns]
+
     X_train = training_data[feature_cols]
     y_train = training_data['wl_up']
 
@@ -502,6 +506,9 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
                 else:
                     lag_value_upstream = y_train.mean()
                 lag_features[f'lag_{lag}_upstream'] = lag_value_upstream
+
+        # ตรวจสอบว่าฟีเจอร์ทั้งหมดสอดคล้องกับฟีเจอร์ที่ใช้เทรนโมเดล
+        lag_features = {key: lag_features[key] for key in feature_cols if key in lag_features}
 
         X_pred = pd.DataFrame([lag_features])
         forecast_value = model.predict(X_pred)[0]
