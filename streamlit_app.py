@@ -626,6 +626,33 @@ def plot_data_combined(data, forecasted_data=None, actual_forecasted_data=None, 
     )
     return fig
 
+# -------------------------------
+# ฟังก์ชันอื่นๆ เช่น clean_data, generate_missing_dates, create_time_features
+# -------------------------------
+def clean_data(df):
+    """
+    ฟังก์ชันสำหรับทำความสะอาดข้อมูล
+    """
+    # ตัวอย่างการทำความสะอาดข้อมูล
+    df = df.dropna(subset=['datetime', 'wl_up'])
+    return df
+
+def generate_missing_dates(df):
+    """
+    ฟังก์ชันสำหรับสร้างวันที่หายไป
+    """
+    # ตัวอย่างการสร้าง missing dates
+    df = df.set_index('datetime').resample('15T').asfreq().reset_index()
+    return df
+
+def create_time_features(df):
+    """
+    ฟังก์ชันสำหรับสร้างฟีเจอร์เวลา
+    """
+    df['hour'] = df['datetime'].dt.hour
+    df['day_of_week'] = df['datetime'].dt.dayofweek
+    return df
+
 # ฟังก์ชันสำหรับการสร้างตารางเปรียบเทียบ (จากโค้ดใหม่)
 def create_comparison_table_streamlit(forecasted_data, actual_data):
     comparison_df = pd.DataFrame({
@@ -873,6 +900,18 @@ elif model_choice == "Linear Regression":
                     else:
                         st.info("ไม่มีข้อมูลสถานีใกล้เคียง")
 
+                    # กำหนดวันเริ่มต้นและสิ้นสุดสำหรับการพยากรณ์
+                    forecast_start_date = st.date_input("เลือกวันที่เริ่มต้นสำหรับการพยากรณ์", value=target_df['datetime'].max().date())
+                    forecast_start_time = st.time_input("เลือกเวลาที่เริ่มต้นสำหรับการพยากรณ์", value=target_df['datetime'].max().time())
+                    forecast_end_date = st.date_input("เลือกวันที่สิ้นสุดสำหรับการพยากรณ์", value=(target_df['datetime'].max() + pd.Timedelta(days=1)).date())
+                    forecast_end_time = st.time_input("เลือกเวลาที่สิ้นสุดสำหรับการพยากรณ์", value=(target_df['datetime'].max() + pd.Timedelta(hours=1)).time())
+
+                    delay_hours = 0
+                    if use_upstream:
+                        delay_hours = st.number_input("Delay Hours สำหรับ upstream data", min_value=0, max_value=24, value=1)
+
+                    process_button2 = st.button("พยากรณ์")
+
                     if process_button2:
                         with st.spinner("กำลังพยากรณ์..."):
                             start_datetime = pd.Timestamp.combine(forecast_start_date, forecast_start_time)
@@ -890,7 +929,7 @@ elif model_choice == "Linear Regression":
 
                                     if use_upstream and upstream_df is not None and not upstream_df.empty:
                                         # พยากรณ์ด้วย Linear Regression (สองสถานี)
-                                        forecasted_data = forecast_with_linear_regression_two(
+                                        forecasted_data, actual_forecasted_data = forecast_with_linear_regression_two(
                                             data=target_df.set_index('datetime'),
                                             upstream_data=upstream_df.set_index('datetime'),
                                             forecast_start_date=forecast_start_date_actual,
@@ -898,27 +937,32 @@ elif model_choice == "Linear Regression":
                                         )
                                     else:
                                         # พยากรณ์ด้วย Linear Regression (สถานีเดียว)
-                                        forecasted_data = forecast_with_linear_regression_single(
+                                        forecasted_data, actual_forecasted_data = forecast_with_linear_regression_single(
                                             data=target_df.set_index('datetime'),
                                             forecast_start_date=forecast_start_date_actual
                                         )
 
-                                    if not forecasted_data.empty:
+                                    if not forecasted_data.empty and not actual_forecasted_data.empty:
                                         st.subheader('กราฟข้อมูลพร้อมการพยากรณ์')
-                                        st.plotly_chart(plot_data_combined(selected_data.set_index('datetime'), forecasted_data, label='สถานีที่ต้องการทำนาย'))
+                                        st.plotly_chart(plot_data_combined(
+                                            selected_data.set_index('datetime'),
+                                            forecasted_data,
+                                            actual_forecasted_data,
+                                            label='สถานีที่ต้องการทำนาย'
+                                        ))
 
-                                        # ตรวจสอบและคำนวณค่าความแม่นยำ
-                                        mae, rmse, actual_forecasted_data = calculate_error_metrics(
-                                            original=target_df.set_index('datetime'),
+                                        # คำนวณค่า MAE และ RMSE
+                                        mae, rmse, comparison_data = calculate_error_metrics(
+                                            original=actual_forecasted_data.set_index('Datetime'),
                                             forecasted=forecasted_data
                                         )
 
-                                        if actual_forecasted_data is not None:
+                                        if comparison_data is not None:
                                             st.subheader('ตารางข้อมูลเปรียบเทียบ')
                                             comparison_table = pd.DataFrame({
-                                                'Datetime': actual_forecasted_data['Datetime'],
-                                                'ค่าจริง (ถ้ามี)': actual_forecasted_data['Actual'],
-                                                'ค่าที่พยากรณ์': actual_forecasted_data['Forecasted']
+                                                'Datetime': comparison_data['Datetime'],
+                                                'ค่าจริง (ถ้ามี)': comparison_data['Actual'],
+                                                'ค่าที่พยากรณ์': comparison_data['Forecasted']
                                             })
                                             st.dataframe(comparison_table)
 
