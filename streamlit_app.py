@@ -522,11 +522,11 @@ def plot_data_combined(data, forecasted=None, label='ระดับน้ำ', 
     
     # ตรวจสอบว่ามีข้อมูลพยากรณ์และวันที่เริ่มต้นการพยากรณ์หรือไม่
     if forecast_start_date is not None:
-        # แสดงข้อมูลที่มีอยู่ในช่วงการพยากรณ์เพื่อเปรียบเทียบกับค่าที่พยากรณ์
+        # แสดงข้อมูลที่มีอยู่ในช่วงการพยากรณ์เพื่อเปรียบเทียบกับค่าที่พยากรณ์ (สีเขียว)
         actual_data_during_forecast = data.loc[forecast_start_date:forecasted.index.max()]
         if not actual_data_during_forecast.empty:
             fig.add_scatter(x=actual_data_during_forecast.index, y=actual_data_during_forecast['wl_up'], 
-                            mode='lines', name='ค่าจริงในช่วงการพยากรณ์', line=dict(color='blue', dash='dash'))
+                            mode='lines', name='ค่าจริงในช่วงการพยากรณ์', line=dict(color='green', dash='solid'))
     
     fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
     return fig
