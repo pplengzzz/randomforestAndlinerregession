@@ -602,22 +602,22 @@ def plot_data_combined(data, forecasted_data=None, actual_forecasted_data=None, 
     fig = px.line(data, x=data.index, y='wl_up', 
                   title=f'ระดับน้ำที่สถานี {label}', 
                   labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
-    
+
     # ปรับแต่งเส้นกราฟข้อมูลจริง
     fig.update_traces(line=dict(color='blue'), name='ค่าจริง', connectgaps=False)
-    
+
     # เพิ่มเส้นกราฟค่าที่พยากรณ์หากมี
     if forecasted_data is not None and not forecasted_data.empty:
         fig.add_scatter(x=forecasted_data.index, y=forecasted_data['wl_up'], 
                         mode='lines', name='ค่าที่พยากรณ์', 
                         line=dict(color='red'))
-    
+
     # เพิ่มเส้นกราฟค่าจริงในช่วงพยากรณ์หากมี
     if actual_forecasted_data is not None and not actual_forecasted_data.empty:
-        fig.add_scatter(x=actual_forecasted_data.index, y=actual_forecasted_data['wl_up'], 
+        fig.add_scatter(x=actual_forecasted_data['Datetime'], y=actual_forecasted_data['Actual'], 
                         mode='lines', name='ค่าจริง (ช่วงพยากรณ์)', 
                         line=dict(color='green'))
-    
+
     # ปรับแต่งเลเจนด์
     fig.update_layout(
         xaxis_title="วันที่",
@@ -641,7 +641,12 @@ def generate_missing_dates(df):
     """
     ฟังก์ชันสำหรับสร้างวันที่หายไป
     """
-    # ตัวอย่างการสร้าง missing dates
+    # ตรวจสอบว่าคอลัมน์ 'datetime' เป็นชนิด datetime หรือไม่
+    if not pd.api.types.is_datetime64_any_dtype(df['datetime']):
+        st.error("คอลัมน์ 'datetime' ไม่ใช่ชนิด datetime. กรุณาแปลงคอลัมน์ 'datetime' เป็นชนิด datetime ก่อนที่จะเรียกใช้ฟังก์ชันนี้.")
+        return pd.DataFrame()
+    
+    # สร้าง missing dates
     df = df.set_index('datetime').resample('15T').asfreq().reset_index()
     return df
 
@@ -861,117 +866,140 @@ elif model_choice == "Linear Regression":
                 if target_df.empty:
                     st.error("หลังจากการทำความสะอาดข้อมูลแล้วไม่มีข้อมูลที่เหลือ")
                 else:
-                    target_df = generate_missing_dates(target_df)
+                    # แปลงคอลัมน์ 'datetime' เป็นชนิด datetime ก่อน
                     target_df['datetime'] = pd.to_datetime(target_df['datetime'], errors='coerce').dt.tz_localize(None)  # แปลงเป็น timezone-naive
-                    target_df = create_time_features(target_df)
-                    target_df['wl_up_prev'] = target_df['wl_up'].shift(1)
-                    target_df['wl_up_prev'] = target_df['wl_up_prev'].interpolate(method='linear')
 
-                    # โหลดข้อมูลสถานีใกล้เคียงถ้าเลือกใช้
-                    if use_upstream and uploaded_up_file:
-                        try:
-                            upstream_df = pd.read_csv(uploaded_up_file)
-                        except Exception as e:
-                            st.error(f"เกิดข้อผิดพลาดในการโหลดไฟล์สถานีข้างบน: {e}")
-                            upstream_df = pd.DataFrame()
-
-                        if upstream_df.empty:
-                            st.error("ไฟล์ CSV สถานีใกล้เคียงว่างเปล่า กรุณาอัปโหลดไฟล์ที่มีข้อมูล")
-                            upstream_df = pd.DataFrame()
+                    # ตรวจสอบการแปลง datetime สำเร็จหรือไม่
+                    if target_df['datetime'].isnull().all():
+                        st.error("ไม่สามารถแปลงคอลัมน์ 'datetime' เป็นชนิด datetime ได้ กรุณาตรวจสอบรูปแบบข้อมูล")
+                        target_df = pd.DataFrame()
+                    else:
+                        # สร้าง missing dates หลังจากแปลง datetime เรียบร้อยแล้ว
+                        target_df = generate_missing_dates(target_df)
+                        if target_df.empty:
+                            st.error("หลังจากการสร้าง missing dates แล้วไม่มีข้อมูลที่เหลือ")
                         else:
-                            upstream_df = clean_data(upstream_df)
-                            if upstream_df.empty:
-                                st.error("หลังจากการทำความสะอาดข้อมูลสถานีใกล้เคียงแล้วไม่มีข้อมูลที่เหลือ")
-                                upstream_df = pd.DataFrame()
-                            else:
-                                upstream_df = generate_missing_dates(upstream_df)
-                                upstream_df['datetime'] = pd.to_datetime(upstream_df['datetime'], errors='coerce').dt.tz_localize(None)  # แปลงเป็น timezone-naive
-                                upstream_df = create_time_features(upstream_df)
-                                upstream_df['wl_up_prev'] = upstream_df['wl_up'].shift(1)
-                                upstream_df['wl_up_prev'] = upstream_df['wl_up_prev'].interpolate(method='linear')
-                    else:
-                        upstream_df = pd.DataFrame()
+                            target_df = create_time_features(target_df)
+                            target_df['wl_up_prev'] = target_df['wl_up'].shift(1)
+                            target_df['wl_up_prev'] = target_df['wl_up_prev'].interpolate(method='linear')
 
-                    # แสดงกราฟข้อมูล
-                    st.subheader('กราฟข้อมูลระดับน้ำ')
-                    st.plotly_chart(plot_data_combined(target_df.set_index('datetime'), label='สถานีที่ต้องการทำนาย'))
-                    if upstream_df is not None and not upstream_df.empty:
-                        st.plotly_chart(plot_data_combined(upstream_df.set_index('datetime'), label='สถานีใกล้เคียง (up)'))
-                    else:
-                        st.info("ไม่มีข้อมูลสถานีใกล้เคียง")
+                            # โหลดข้อมูลสถานีใกล้เคียงถ้าเลือกใช้
+                            if use_upstream and uploaded_up_file:
+                                try:
+                                    upstream_df = pd.read_csv(uploaded_up_file)
+                                except Exception as e:
+                                    st.error(f"เกิดข้อผิดพลาดในการโหลดไฟล์สถานีข้างบน: {e}")
+                                    upstream_df = pd.DataFrame()
 
-                    # กำหนดวันเริ่มต้นและสิ้นสุดสำหรับการพยากรณ์
-                    forecast_start_date = st.date_input("เลือกวันที่เริ่มต้นสำหรับการพยากรณ์", value=target_df['datetime'].max().date())
-                    forecast_start_time = st.time_input("เลือกเวลาที่เริ่มต้นสำหรับการพยากรณ์", value=target_df['datetime'].max().time())
-                    forecast_end_date = st.date_input("เลือกวันที่สิ้นสุดสำหรับการพยากรณ์", value=(target_df['datetime'].max() + pd.Timedelta(days=1)).date())
-                    forecast_end_time = st.time_input("เลือกเวลาที่สิ้นสุดสำหรับการพยากรณ์", value=(target_df['datetime'].max() + pd.Timedelta(hours=1)).time())
-
-                    delay_hours = 0
-                    if use_upstream:
-                        delay_hours = st.number_input("Delay Hours สำหรับ upstream data", min_value=0, max_value=24, value=1)
-
-                    process_button2 = st.button("พยากรณ์")
-
-                    if process_button2:
-                        with st.spinner("กำลังพยากรณ์..."):
-                            start_datetime = pd.Timestamp.combine(forecast_start_date, forecast_start_time)
-                            end_datetime = pd.Timestamp.combine(forecast_end_date, forecast_end_time)
-
-                            if start_datetime > end_datetime:
-                                st.error("วันและเวลาที่เริ่มต้นต้องไม่เกินวันและเวลาสิ้นสุด")
-                            else:
-                                selected_data = target_df[(target_df['datetime'] >= start_datetime) & (target_df['datetime'] <= end_datetime)].copy()
-
-                                if selected_data.empty:
-                                    st.error("ไม่มีข้อมูลในช่วงวันที่ที่เลือก กรุณาเลือกวันที่ใหม่")
+                                if upstream_df.empty:
+                                    st.error("ไฟล์ CSV สถานีใกล้เคียงว่างเปล่า กรุณาอัปโหลดไฟล์ที่มีข้อมูล")
+                                    upstream_df = pd.DataFrame()
                                 else:
-                                    forecast_start_date_actual = selected_data['datetime'].max() + pd.Timedelta(minutes=15)
-
-                                    if use_upstream and upstream_df is not None and not upstream_df.empty:
-                                        # พยากรณ์ด้วย Linear Regression (สองสถานี)
-                                        forecasted_data, actual_forecasted_data = forecast_with_linear_regression_two(
-                                            data=target_df.set_index('datetime'),
-                                            upstream_data=upstream_df.set_index('datetime'),
-                                            forecast_start_date=forecast_start_date_actual,
-                                            delay_hours=delay_hours
-                                        )
+                                    upstream_df = clean_data(upstream_df)
+                                    if upstream_df.empty:
+                                        st.error("หลังจากการทำความสะอาดข้อมูลสถานีใกล้เคียงแล้วไม่มีข้อมูลที่เหลือ")
+                                        upstream_df = pd.DataFrame()
                                     else:
-                                        # พยากรณ์ด้วย Linear Regression (สถานีเดียว)
-                                        forecasted_data, actual_forecasted_data = forecast_with_linear_regression_single(
-                                            data=target_df.set_index('datetime'),
-                                            forecast_start_date=forecast_start_date_actual
-                                        )
+                                        # แปลงคอลัมน์ 'datetime' เป็นชนิด datetime ก่อน
+                                        upstream_df['datetime'] = pd.to_datetime(upstream_df['datetime'], errors='coerce').dt.tz_localize(None)  # แปลงเป็น timezone-naive
 
-                                    if not forecasted_data.empty and not actual_forecasted_data.empty:
-                                        st.subheader('กราฟข้อมูลพร้อมการพยากรณ์')
-                                        st.plotly_chart(plot_data_combined(
-                                            selected_data.set_index('datetime'),
-                                            forecasted_data,
-                                            actual_forecasted_data,
-                                            label='สถานีที่ต้องการทำนาย'
-                                        ))
-
-                                        # คำนวณค่า MAE และ RMSE
-                                        mae, rmse, comparison_data = calculate_error_metrics(
-                                            original=actual_forecasted_data.set_index('Datetime'),
-                                            forecasted=forecasted_data
-                                        )
-
-                                        if comparison_data is not None:
-                                            st.subheader('ตารางข้อมูลเปรียบเทียบ')
-                                            comparison_table = pd.DataFrame({
-                                                'Datetime': comparison_data['Datetime'],
-                                                'ค่าจริง (ถ้ามี)': comparison_data['Actual'],
-                                                'ค่าที่พยากรณ์': comparison_data['Forecasted']
-                                            })
-                                            st.dataframe(comparison_table)
-
-                                            st.write(f"Mean Absolute Error (MAE): {mae:.2f}")
-                                            st.write(f"Root Mean Squared Error (RMSE): {rmse:.2f}")
+                                        # ตรวจสอบการแปลง datetime สำเร็จหรือไม่
+                                        if upstream_df['datetime'].isnull().all():
+                                            st.error("ไม่สามารถแปลงคอลัมน์ 'datetime' ของ upstream เป็นชนิด datetime ได้ กรุณาตรวจสอบรูปแบบข้อมูล")
+                                            upstream_df = pd.DataFrame()
                                         else:
-                                            st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่า MAE และ RMSE ได้")
+                                            # สร้าง missing dates หลังจากแปลง datetime เรียบร้อยแล้ว
+                                            upstream_df = generate_missing_dates(upstream_df)
+                                            if upstream_df.empty:
+                                                st.error("หลังจากการสร้าง missing dates ของ upstream แล้วไม่มีข้อมูลที่เหลือ")
+                                                upstream_df = pd.DataFrame()
+                                            else:
+                                                upstream_df = create_time_features(upstream_df)
+                                                upstream_df['wl_up_prev'] = upstream_df['wl_up'].shift(1)
+                                                upstream_df['wl_up_prev'] = upstream_df['wl_up_prev'].interpolate(method='linear')
+                            else:
+                                upstream_df = pd.DataFrame()
+
+                            # แสดงกราฟข้อมูล
+                            st.subheader('กราฟข้อมูลระดับน้ำ')
+                            st.plotly_chart(plot_data_combined(target_df.set_index('datetime'), label='สถานีที่ต้องการทำนาย'))
+                            if upstream_df is not None and not upstream_df.empty:
+                                st.plotly_chart(plot_data_combined(upstream_df.set_index('datetime'), label='สถานีใกล้เคียง (up)'))
+                            else:
+                                st.info("ไม่มีข้อมูลสถานีใกล้เคียง")
+
+                            # กำหนดวันเริ่มต้นและสิ้นสุดสำหรับการพยากรณ์
+                            forecast_start_date = st.date_input("เลือกวันที่เริ่มต้นสำหรับการพยากรณ์", value=target_df['datetime'].max().date())
+                            forecast_start_time = st.time_input("เลือกเวลาที่เริ่มต้นสำหรับการพยากรณ์", value=target_df['datetime'].max().time())
+                            forecast_end_date = st.date_input("เลือกวันที่สิ้นสุดสำหรับการพยากรณ์", value=(target_df['datetime'].max() + pd.Timedelta(days=1)).date())
+                            forecast_end_time = st.time_input("เลือกเวลาที่สิ้นสุดสำหรับการพยากรณ์", value=(target_df['datetime'].max() + pd.Timedelta(hours=1)).time())
+
+                            delay_hours = 0
+                            if use_upstream:
+                                delay_hours = st.number_input("Delay Hours สำหรับ upstream data", min_value=0, max_value=24, value=1)
+
+                            process_button2 = st.button("พยากรณ์")
+
+                            if process_button2:
+                                with st.spinner("กำลังพยากรณ์..."):
+                                    start_datetime = pd.Timestamp.combine(forecast_start_date, forecast_start_time)
+                                    end_datetime = pd.Timestamp.combine(forecast_end_date, forecast_end_time)
+
+                                    if start_datetime > end_datetime:
+                                        st.error("วันและเวลาที่เริ่มต้นต้องไม่เกินวันและเวลาสิ้นสุด")
                                     else:
-                                        st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
+                                        selected_data = target_df[(target_df['datetime'] >= start_datetime) & (target_df['datetime'] <= end_datetime)].copy()
+
+                                        if selected_data.empty:
+                                            st.error("ไม่มีข้อมูลในช่วงวันที่ที่เลือก กรุณาเลือกวันที่ใหม่")
+                                        else:
+                                            forecast_start_date_actual = selected_data['datetime'].max() + pd.Timedelta(minutes=15)
+
+                                            if use_upstream and upstream_df is not None and not upstream_df.empty:
+                                                # พยากรณ์ด้วย Linear Regression (สองสถานี)
+                                                forecasted_data, actual_forecasted_data = forecast_with_linear_regression_two(
+                                                    data=target_df.set_index('datetime'),
+                                                    upstream_data=upstream_df.set_index('datetime'),
+                                                    forecast_start_date=forecast_start_date_actual,
+                                                    delay_hours=delay_hours
+                                                )
+                                            else:
+                                                # พยากรณ์ด้วย Linear Regression (สถานีเดียว)
+                                                forecasted_data, actual_forecasted_data = forecast_with_linear_regression_single(
+                                                    data=target_df.set_index('datetime'),
+                                                    forecast_start_date=forecast_start_date_actual
+                                                )
+
+                                            if not forecasted_data.empty and not actual_forecasted_data.empty:
+                                                st.subheader('กราฟข้อมูลพร้อมการพยากรณ์')
+                                                st.plotly_chart(plot_data_combined(
+                                                    selected_data.set_index('datetime'),
+                                                    forecasted_data,
+                                                    actual_forecasted_data,
+                                                    label='สถานีที่ต้องการทำนาย'
+                                                ))
+
+                                                # คำนวณค่า MAE และ RMSE
+                                                mae, rmse, comparison_data = calculate_error_metrics(
+                                                    original=actual_forecasted_data.set_index('Datetime'),
+                                                    forecasted=forecasted_data
+                                                )
+
+                                                if comparison_data is not None:
+                                                    st.subheader('ตารางข้อมูลเปรียบเทียบ')
+                                                    comparison_table = pd.DataFrame({
+                                                        'Datetime': comparison_data['Datetime'],
+                                                        'ค่าจริง (ถ้ามี)': comparison_data['Actual'],
+                                                        'ค่าที่พยากรณ์': comparison_data['Forecasted']
+                                                    })
+                                                    st.dataframe(comparison_table)
+
+                                                    st.write(f"Mean Absolute Error (MAE): {mae:.2f}")
+                                                    st.write(f"Root Mean Squared Error (RMSE): {rmse:.2f}")
+                                                else:
+                                                    st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่า MAE และ RMSE ได้")
+                                            else:
+                                                st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
         else:
             st.info("กรุณาอัปโหลดไฟล์ CSV สำหรับเติมข้อมูล เพื่อเริ่มต้นการพยากรณ์")
 
