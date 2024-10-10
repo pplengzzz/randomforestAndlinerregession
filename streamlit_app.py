@@ -512,11 +512,22 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
     return forecasted_data
 
 # ฟังก์ชันสำหรับการแสดงกราฟข้อมูลพร้อมการพยากรณ์
-def plot_data_combined(data, forecasted=None, label='ระดับน้ำ'):
+def plot_data_combined(data, forecasted=None, label='ระดับน้ำ', forecast_start_date=None):
     fig = px.line(data, x=data.index, y='wl_up', title=f'ระดับน้ำที่สถานี {label}', labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
     fig.update_traces(connectgaps=False)
+    
     if forecasted is not None and not forecasted.empty:
+        # แสดงค่าที่พยากรณ์ (สีแดง)
         fig.add_scatter(x=forecasted.index, y=forecasted['wl_up'], mode='lines', name='ค่าที่พยากรณ์', line=dict(color='red'))
+    
+    # ตรวจสอบว่ามีข้อมูลพยากรณ์และวันที่เริ่มต้นการพยากรณ์หรือไม่
+    if forecast_start_date is not None:
+        # แสดงข้อมูลที่มีอยู่ในช่วงการพยากรณ์เพื่อเปรียบเทียบกับค่าที่พยากรณ์
+        actual_data_during_forecast = data.loc[forecast_start_date:forecasted.index.max()]
+        if not actual_data_during_forecast.empty:
+            fig.add_scatter(x=actual_data_during_forecast.index, y=actual_data_during_forecast['wl_up'], 
+                            mode='lines', name='ค่าจริงในช่วงการพยากรณ์', line=dict(color='blue', dash='dash'))
+    
     fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
     return fig
 
