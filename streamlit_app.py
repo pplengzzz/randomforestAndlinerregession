@@ -356,6 +356,7 @@ def forecast_with_linear_regression_single(data, forecast_start_date):
 
     Returns:
     - forecasted_data (pd.DataFrame): DataFrame ของค่าที่พยากรณ์
+    - actual_forecasted (pd.DataFrame): DataFrame ของค่าจริงในช่วงพยากรณ์
     """
     # ใช้ข้อมูลย้อนหลัง 3 วันในการเทรนโมเดล
     training_data_end = forecast_start_date - pd.Timedelta(minutes=15)
@@ -364,7 +365,7 @@ def forecast_with_linear_regression_single(data, forecast_start_date):
     # ตรวจสอบว่ามีข้อมูลเพียงพอหรือไม่
     if training_data_start < data.index.min():
         st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลสำหรับการเทรนไม่เพียงพอ")
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
 
     # สร้างชุดข้อมูลสำหรับการเทรน
     training_data = data.loc[training_data_start:training_data_end].copy()
@@ -380,7 +381,7 @@ def forecast_with_linear_regression_single(data, forecast_start_date):
     # ตรวจสอบว่ามีข้อมูลเพียงพอหลังจากสร้างฟีเจอร์ lag
     if training_data.empty:
         st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอหลังจากสร้างฟีเจอร์ lag")
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
 
     # กำหนดฟีเจอร์และตัวแปรเป้าหมาย
     feature_cols = [f'lag_{lag}' for lag in lags]
@@ -418,7 +419,10 @@ def forecast_with_linear_regression_single(data, forecast_start_date):
         # อัปเดต 'combined_data' ด้วยค่าที่พยากรณ์เพื่อใช้ในการพยากรณ์ครั้งถัดไป
         combined_data.at[idx, 'wl_up'] = forecast_value
 
-    return forecasted_data
+    # สมมติว่ามีข้อมูลจริงในช่วงพยากรณ์
+    actual_forecasted = data.loc[forecast_start_date:forecast_start_date + pd.Timedelta(days=1)].copy()
+
+    return forecasted_data, actual_forecasted
 
 # -------------------------------
 # ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression แบบ Two Stations (รวม Upstream)
@@ -435,6 +439,7 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
 
     Returns:
     - forecasted_data (pd.DataFrame): DataFrame ของค่าที่พยากรณ์
+    - actual_forecasted (pd.DataFrame): DataFrame ของค่าจริงในช่วงพยากรณ์
     """
     # เตรียมข้อมูลจาก upstream_data
     if not upstream_data.empty:
@@ -448,7 +453,7 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
 
     if training_data_start < data.index.min():
         st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลสำหรับการเทรนไม่เพียงพอ")
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
 
     # สร้างชุดข้อมูลสำหรับการเทรน
     training_data = data.loc[training_data_start:training_data_end].copy()
@@ -471,7 +476,7 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
     # ตรวจสอบว่ามีข้อมูลเพียงพอหลังจากสร้างฟีเจอร์ lag
     if training_data.empty:
         st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอหลังจากสร้างฟีเจอร์ lag")
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
 
     # กำหนดฟีเจอร์และตัวแปรเป้าหมาย
     if not upstream_data.empty:
@@ -532,7 +537,10 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
         if not upstream_data.empty:
             combined_upstream.at[idx, 'wl_up'] = lag_features.get(f'lag_{lag}_upstream', y_train.mean())
 
-    return forecasted_data
+    # สมมติว่ามีข้อมูลจริงในช่วงพยากรณ์
+    actual_forecasted = data.loc[forecast_start_date:forecast_start_date + pd.Timedelta(days=1)].copy()
+
+    return forecasted_data, actual_forecasted
 
 # -------------------------------
 # ฟังก์ชันสำหรับการคำนวณค่า MAE และ RMSE
@@ -569,21 +577,22 @@ def calculate_error_metrics(original, forecasted):
 
     # คืนค่าข้อมูลจริงและพยากรณ์ที่ใช้ในการเปรียบเทียบ
     actual_forecasted_data = merged.copy()
-    actual_forecasted_data.reset_index(inplace=True)  # Reset index เพื่อให้มีคอลัมน์ 'datetime'
-    actual_forecasted_data.rename(columns={'index': 'Datetime', 'wl_up_actual': 'Actual', 'wl_up_forecasted': 'Forecasted'}, inplace=True)
+    actual_forecasted_data.reset_index(inplace=True)  # Reset index เพื่อให้มีคอลัมน์ 'Datetime'
+    actual_forecasted_data.rename(columns={'datetime': 'Datetime', 'wl_up_actual': 'Actual', 'wl_up_forecasted': 'Forecasted'}, inplace=True)
 
     return mae, rmse, actual_forecasted_data
 
 # -------------------------------
-# ฟังก์ชันสำหรับการแสดงกราฟข้อมูลพร้อมการพยากรณ์
+# ฟังก์ชันสำหรับการแสดงกราฟข้อมูลพร้อมการพยากรณ์และค่าจริงในช่วงพยากรณ์
 # -------------------------------
-def plot_data_combined(data, forecasted_data=None, label='ระดับน้ำ'):
+def plot_data_combined(data, forecasted_data=None, actual_forecasted_data=None, label='ระดับน้ำ'):
     """
-    ฟังก์ชันสำหรับการแสดงกราฟข้อมูลจริง พร้อมการพยากรณ์
+    ฟังก์ชันสำหรับการแสดงกราฟข้อมูลจริง พร้อมการพยากรณ์ และค่าจริงในช่วงพยากรณ์
 
     Parameters:
     - data (pd.DataFrame): DataFrame ของข้อมูลจริง โดยมี index เป็น datetime และคอลัมน์ 'wl_up'
     - forecasted_data (pd.DataFrame): DataFrame ของค่าที่พยากรณ์ โดยมี index เป็น datetime และคอลัมน์ 'wl_up' (optional)
+    - actual_forecasted_data (pd.DataFrame): DataFrame ของค่าจริงในช่วงพยากรณ์ โดยมี index เป็น datetime และคอลัมน์ 'wl_up' (optional)
     - label (str): ชื่อสถานีสำหรับแสดงในกราฟ
 
     Returns:
@@ -602,6 +611,12 @@ def plot_data_combined(data, forecasted_data=None, label='ระดับน้�
         fig.add_scatter(x=forecasted_data.index, y=forecasted_data['wl_up'], 
                         mode='lines', name='ค่าที่พยากรณ์', 
                         line=dict(color='red'))
+    
+    # เพิ่มเส้นกราฟค่าจริงในช่วงพยากรณ์หากมี
+    if actual_forecasted_data is not None and not actual_forecasted_data.empty:
+        fig.add_scatter(x=actual_forecasted_data.index, y=actual_forecasted_data['wl_up'], 
+                        mode='lines', name='ค่าจริง (ช่วงพยากรณ์)', 
+                        line=dict(color='green'))
     
     # ปรับแต่งเลเจนด์
     fig.update_layout(
