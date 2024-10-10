@@ -400,7 +400,7 @@ def forecast_with_linear_regression_single(data, forecast_start_date):
     # สร้างชุดข้อมูลสำหรับการพยากรณ์
     combined_data = data.copy()
 
-    # การพยากรณ์
+    # การพยากรณ์ทีละค่า
     for idx in forecasted_data.index:
         lag_features = {}
         for lag in lags:
@@ -504,7 +504,7 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
     if not upstream_data.empty:
         combined_upstream = upstream_data.copy()
 
-    # การพยากรณ์
+    # การพยากรณ์ทีละค่า
     for idx in forecasted_data.index:
         lag_features = {}
         for lag in lags:
@@ -597,7 +597,11 @@ def plot_data_combined(data, forecasted=None, actual_forecasted=None, label='ร
     if actual_forecasted is not None and not actual_forecasted.empty:
         fig.add_scatter(x=actual_forecasted.index, y=actual_forecasted['wl_up'], mode='lines', name='ค่าจริง (ช่วงพยากรณ์)', line=dict(color='green'))
 
-    fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
+    fig.update_layout(
+        xaxis_title="วันที่",
+        yaxis_title="ระดับน้ำ (wl_up)",
+        legend=dict(title="ข้อมูล")
+    )
     return fig
 
 # ฟังก์ชันสำหรับการสร้างตารางเปรียบเทียบ (จากโค้ดใหม่)
@@ -683,7 +687,7 @@ with st.sidebar:
             if use_upstream:
                 delay_hours = st.number_input("ระบุเวลาห่างระหว่างสถานี (ชั่วโมง)", value=0, min_value=0)
 
-        with st.sidebar.expander("เลือกช่วงข้อมูลสำหรับพยากรณ์", expanded=False):
+        with st.sidebar.expander("เลือกช่วงข้อมูลสำหรับฝึกโมเดล", expanded=False):
             forecast_start_date = st.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2024-06-01"), key='forecast_start_lr')
             forecast_start_time = st.time_input("เวลาเริ่มต้น", value=pd.Timestamp("00:00:00").time(), key='forecast_start_time_lr')
             forecast_end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2024-06-02"), key='forecast_end_lr')
