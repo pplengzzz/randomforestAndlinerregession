@@ -542,19 +542,12 @@ def calculate_error_metrics(original, forecasted):
     ฟังก์ชันสำหรับคำนวณค่า MAE และ RMSE ระหว่างข้อมูลจริงและค่าที่พยากรณ์
 
     Parameters:
-    - original (pd.DataFrame): DataFrame ของข้อมูลจริง โดยมีคอลัมน์ 'datetime' และ 'wl_up'
+    - original (pd.DataFrame): DataFrame ของข้อมูลจริง โดยมี index เป็น datetime และคอลัมน์ 'wl_up'
     - forecasted (pd.DataFrame): DataFrame ของค่าที่พยากรณ์ โดยมี index เป็น datetime และคอลัมน์ 'wl_up'
 
     Returns:
     - tuple: (MAE, RMSE, actual_forecasted_data)
     """
-    # แปลง 'datetime' ใน original เป็น datetime ถ้ายังไม่ใช่
-    if 'datetime' in original.columns and not pd.api.types.is_datetime64_any_dtype(original['datetime']):
-        original['datetime'] = pd.to_datetime(original['datetime'], errors='coerce')
-    
-    # ตั้ง 'datetime' เป็น index
-    original = original.set_index('datetime')
-    
     # ตรวจสอบว่าทั้งสอง DataFrame มี index เป็น datetime
     if not isinstance(original.index, pd.DatetimeIndex) or not isinstance(forecasted.index, pd.DatetimeIndex):
         st.warning("ทั้งสอง DataFrame ต้องมี index เป็น datetime")
@@ -576,22 +569,21 @@ def calculate_error_metrics(original, forecasted):
 
     # คืนค่าข้อมูลจริงและพยากรณ์ที่ใช้ในการเปรียบเทียบ
     actual_forecasted_data = merged.copy()
-    actual_forecasted_data.reset_index(inplace=True)  # Reset index เพื่อให้มีคอลัมน์ 'Datetime'
-    actual_forecasted_data.rename(columns={'datetime': 'Datetime', 'wl_up_actual': 'Actual', 'wl_up_forecasted': 'Forecasted'}, inplace=True)
+    actual_forecasted_data.reset_index(inplace=True)  # Reset index เพื่อให้มีคอลัมน์ 'datetime'
+    actual_forecasted_data.rename(columns={'index': 'Datetime', 'wl_up_actual': 'Actual', 'wl_up_forecasted': 'Forecasted'}, inplace=True)
 
     return mae, rmse, actual_forecasted_data
 
 # -------------------------------
-# ฟังก์ชันสำหรับการแสดงกราฟข้อมูลพร้อมการพยากรณ์และค่าจริงในช่วงพยากรณ์
+# ฟังก์ชันสำหรับการแสดงกราฟข้อมูลพร้อมการพยากรณ์
 # -------------------------------
-def plot_data_combined(data, forecasted_data=None, actual_forecasted_data=None, label='ระดับน้ำ'):
+def plot_data_combined(data, forecasted_data=None, label='ระดับน้ำ'):
     """
-    ฟังก์ชันสำหรับการแสดงกราฟข้อมูลจริง พร้อมการพยากรณ์ และค่าจริงในช่วงพยากรณ์
+    ฟังก์ชันสำหรับการแสดงกราฟข้อมูลจริง พร้อมการพยากรณ์
 
     Parameters:
     - data (pd.DataFrame): DataFrame ของข้อมูลจริง โดยมี index เป็น datetime และคอลัมน์ 'wl_up'
     - forecasted_data (pd.DataFrame): DataFrame ของค่าที่พยากรณ์ โดยมี index เป็น datetime และคอลัมน์ 'wl_up' (optional)
-    - actual_forecasted_data (pd.DataFrame): DataFrame ของค่าจริงในช่วงพยากรณ์ โดยมีคอลัมน์ 'Datetime' และ 'Actual' (optional)
     - label (str): ชื่อสถานีสำหรับแสดงในกราฟ
 
     Returns:
@@ -601,22 +593,16 @@ def plot_data_combined(data, forecasted_data=None, actual_forecasted_data=None, 
     fig = px.line(data, x=data.index, y='wl_up', 
                   title=f'ระดับน้ำที่สถานี {label}', 
                   labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
-
+    
     # ปรับแต่งเส้นกราฟข้อมูลจริง
     fig.update_traces(line=dict(color='blue'), name='ค่าจริง', connectgaps=False)
-
+    
     # เพิ่มเส้นกราฟค่าที่พยากรณ์หากมี
     if forecasted_data is not None and not forecasted_data.empty:
         fig.add_scatter(x=forecasted_data.index, y=forecasted_data['wl_up'], 
                         mode='lines', name='ค่าที่พยากรณ์', 
                         line=dict(color='red'))
-
-    # เพิ่มเส้นกราฟค่าจริงในช่วงพยากรณ์หากมี
-    if actual_forecasted_data is not None and not actual_forecasted_data.empty:
-        fig.add_scatter(x=actual_forecasted_data['Datetime'], y=actual_forecasted_data['Actual'], 
-                        mode='lines', name='ค่าจริง (ช่วงพยากรณ์)', 
-                        line=dict(color='green'))
-
+    
     # ปรับแต่งเลเจนด์
     fig.update_layout(
         xaxis_title="วันที่",
@@ -624,42 +610,6 @@ def plot_data_combined(data, forecasted_data=None, actual_forecasted_data=None, 
         legend=dict(title="ข้อมูล")
     )
     return fig
-
-# -------------------------------
-# ฟังก์ชันอื่นๆ เช่น clean_data, generate_missing_dates, create_time_features
-# -------------------------------
-def clean_data(df):
-    """
-    ฟังก์ชันสำหรับทำความสะอาดข้อมูล
-    """
-    # ตัวอย่างการทำความสะอาดข้อมูล
-    df = df.dropna(subset=['datetime', 'wl_up'])
-    return df
-
-def generate_missing_dates(df):
-    """
-    ฟังก์ชันสำหรับสร้างวันที่หายไป
-    """
-    # แปลงคอลัมน์ 'datetime' เป็นชนิด datetime ถ้ายังไม่ใช่
-    if not pd.api.types.is_datetime64_any_dtype(df['datetime']):
-        df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce')
-    
-    # ตรวจสอบว่ามีค่า datetime ที่ไม่ใช่ NaT
-    if df['datetime'].isnull().all():
-        st.error("ไม่สามารถแปลงคอลัมน์ 'datetime' เป็นชนิด datetime ได้ กรุณาตรวจสอบรูปแบบข้อมูล")
-        return pd.DataFrame()
-    
-    # สร้าง missing dates
-    df = df.set_index('datetime').resample('15T').asfreq().reset_index()
-    return df
-
-def create_time_features(df):
-    """
-    ฟังก์ชันสำหรับสร้างฟีเจอร์เวลา
-    """
-    df['hour'] = df['datetime'].dt.hour
-    df['day_of_week'] = df['datetime'].dt.dayofweek
-    return df
 
 # ฟังก์ชันสำหรับการสร้างตารางเปรียบเทียบ (จากโค้ดใหม่)
 def create_comparison_table_streamlit(forecasted_data, actual_data):
