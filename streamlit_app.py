@@ -343,75 +343,14 @@ def merge_data(df1, df2=None):
         merged_df = df1.copy()
     return merged_df
 
-import pandas as pd
-import streamlit as st
-import plotly.express as px
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, mean_squared_error
-
-# ฟังก์ชันสำหรับโหลดข้อมูล (สมมติว่ามีการกำหนดไว้แล้วในโค้ดของคุณ)
-def load_data(uploaded_file):
-    try:
-        df = pd.read_csv(uploaded_file)
-        return df
-    except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการโหลดไฟล์: {e}")
-        return None
-
-# ฟังก์ชันสำหรับทำความสะอาดข้อมูล (สมมติว่ามีการกำหนดไว้แล้วในโค้ดของคุณ)
-def clean_data(df):
-    # ตัวอย่างการทำความสะอาดข้อมูล
-    df = df.dropna(subset=['datetime', 'wl_up'])
-    df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce')
-    df = df.set_index('datetime')
-    return df
-
-# ฟังก์ชันสำหรับสร้างวันที่ที่ขาดหายไป (สมมติว่ามีการกำหนดไว้แล้วในโค้ดของคุณ)
-def generate_missing_dates(df):
-    all_dates = pd.date_range(start=df.index.min(), end=df.index.max(), freq='15T')
-    df = df.reindex(all_dates)
-    return df
-
-# ฟังก์ชันสำหรับเติมค่าคอลัมน์ 'code' (สมมติว่ามีการกำหนดไว้แล้วในโค้ดของคุณ)
-def fill_code_column(df):
-    df['code'] = df['code'].fillna(method='ffill')
-    return df
-
-# ฟังก์ชันสำหรับสร้างฟีเจอร์เวลา (สมมติว่ามีการกำหนดไว้แล้วในโค้ดของคุณ)
-def create_time_features(df):
-    df['hour'] = df.index.hour
-    df['day_of_week'] = df.index.dayofweek
-    return df
-
-# ฟังก์ชันสำหรับลบข้อมูลตามช่วงเวลา (สมมติว่ามีการกำหนดไว้แล้วในโค้ดของคุณ)
-def delete_data_by_date_range(df, start_datetime, end_datetime):
-    return df.drop(df.loc[start_datetime:end_datetime].index)
-
-# ฟังก์ชันสำหรับรวมข้อมูลจากสองสถานี (สมมติว่ามีการกำหนดไว้แล้วในโค้ดของคุณ)
-def merge_data(df1, df2):
-    return df1.join(df2, lsuffix='_main', rsuffix='_second')
-
-# ฟังก์ชันสำหรับการจัดการค่าที่ขาดหายไปโดยใช้วิธีเฉลี่ยต่อสัปดาห์ (สมมติว่ามีการกำหนดไว้แล้วในโค้ดของคุณ)
-def handle_missing_values_by_week(df, start_date, end_date, model_type='linear_regression'):
-    # ตัวอย่างการจัดการค่าที่ขาดหายไป
-    df = df.interpolate(method='time')
-    return df
-
-# ฟังก์ชันสำหรับแสดงกราฟตัวอย่าง (สมมติว่ามีการกำหนดไว้แล้วในโค้ดของคุณ)
-def plot_data_preview(df1, df2, time_lag):
-    fig = px.line(df1, x=df1.index, y='wl_up', title='ข้อมูลระดับน้ำหลัก', labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
-    if df2 is not None:
-        fig.add_scatter(x=df2.index + time_lag, y=df2['wl_up'], mode='lines', name='ระดับน้ำสถานีใกล้เคียง', line=dict(color='green'))
-    st.plotly_chart(fig)
-
 # ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression (สถานีเดียว)
-def forecast_with_linear_regression_single(data, forecast_start_date, forecast_days=1, training_days=3):
+def forecast_with_linear_regression_single(data, forecast_start_date, forecast_days=1):
     # ใช้ข้อมูลย้อนหลังตามที่ผู้ใช้เลือกในการเทรนโมเดล
     training_data_end = forecast_start_date - pd.Timedelta(minutes=15)
-    training_data_start = training_data_end - pd.Timedelta(days=training_days) + pd.Timedelta(minutes=15)
+    training_data_start = data.index.min()  # ใช้ข้อมูลทั้งหมดจากเริ่มต้นจนถึง training_data_end
 
     # ตรวจสอบว่ามีข้อมูลเพียงพอหรือไม่
-    if training_data_start < data.index.min():
+    if training_data_start > training_data_end - pd.Timedelta(days=1):
         st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลสำหรับการเทรนไม่เพียงพอ")
         return pd.DataFrame()
 
@@ -470,18 +409,18 @@ def forecast_with_linear_regression_single(data, forecast_start_date, forecast_d
     return forecasted_data
 
 # ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression (สองสถานี)
-def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date, delay_hours, forecast_days=1, training_days=3):
+def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date, delay_hours, forecast_days=1):
     # เตรียมข้อมูลจาก upstream_data
     if not upstream_data.empty:
         upstream_data = upstream_data.copy()
         if delay_hours > 0:
             upstream_data.index = upstream_data.index + pd.Timedelta(hours=delay_hours)
 
-    # ใช้ข้อมูลย้อนหลังตามที่ผู้ใช้เลือกจากทั้งสองสถานีในการเทรนโมเดล
+    # ใช้ข้อมูลทั้งหมดจากเริ่มต้นจนถึง training_data_end สำหรับการเทรนโมเดล
     training_data_end = forecast_start_date - pd.Timedelta(minutes=15)
-    training_data_start = training_data_end - pd.Timedelta(days=training_days) + pd.Timedelta(minutes=15)
+    training_data_start = data.index.min()  # ใช้ข้อมูลทั้งหมดจากเริ่มต้นจนถึง training_data_end
 
-    if training_data_start < data.index.min():
+    if training_data_start > training_data_end - pd.Timedelta(days=1):
         st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลสำหรับการเทรนไม่เพียงพอ")
         return pd.DataFrame()
 
@@ -581,7 +520,7 @@ def plot_data_combined(data, forecasted=None, label='ระดับน้ำ'):
 # ฟังก์ชันสำหรับการคำนวณค่า MAE และ RMSE
 def calculate_error_metrics(original, forecasted):
     # เปลี่ยน index ของ forecasted เป็น 'datetime' หากยังไม่ใช่
-    if forecasted.index.name != 'datetime':
+    if not isinstance(forecasted.index, pd.DatetimeIndex):
         forecasted = forecasted.reset_index().rename(columns={'index': 'datetime'})
 
     # รวมข้อมูลจริงและพยากรณ์
@@ -660,7 +599,9 @@ with st.sidebar:
         # เลือกช่วงวันที่ใน sidebar
         with st.sidebar.expander("เลือกช่วงข้อมูลสำหรับฝึกโมเดล", expanded=False):
             start_date = st.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2024-05-01"))
+            start_time = st.time_input("เวลาเริ่มต้น", value=pd.Timestamp("00:00:00").time(), key='start_time_rf')
             end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2024-05-31"))
+            end_time = st.time_input("เวลาสิ้นสุด", value=pd.Timestamp("23:45:00").time(), key='end_time_rf')
             
             # เพิ่มตัวเลือกว่าจะลบข้อมูลหรือไม่
             delete_data_option = st.checkbox("ต้องการเลือกลบข้อมูล", value=False)
@@ -692,16 +633,11 @@ with st.sidebar:
             forecast_start_time = st.time_input("เวลาเริ่มต้น", value=pd.Timestamp("00:00:00").time(), key='forecast_start_time_lr')
             forecast_end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2024-06-02"), key='forecast_end_lr')
             forecast_end_time = st.time_input("เวลาสิ้นสุด", value=pd.Timestamp("23:45:00").time(), key='forecast_end_time_lr')
-            
-            # เพิ่มตัวเลือกจำนวนวันที่ต้องการพยากรณ์
+        
+        # เพิ่มตัวเลือกจำนวนวันที่ต้องการพยากรณ์ล่วงหน้า
+        with st.sidebar.expander("ตั้งค่าการพยากรณ์", expanded=False):
             forecast_days = st.number_input("จำนวนวันที่ต้องการพยากรณ์ล่วงหน้า", min_value=1, max_value=30, value=1, step=1)
-            
-            # เพิ่มตัวเลือกจำนวนวันที่ใช้ในการเทรน
-            training_days = st.number_input("จำนวนวันที่ใช้ในการเทรนโมเดล", min_value=1, max_value=30, value=3, step=1)
-
-        # เพิ่มข้อความสำหรับการเลือกจำนวนวันที่พยากรณ์
-        st.markdown("### เลือกจำนวนวันที่ต้องการพยากรณ์ล่วงหน้า")
-    
+        
         process_button2 = st.button("ประมวลผล", type="primary")
 
 # Main content: Display results after file uploads and date selection
@@ -744,17 +680,16 @@ if model_choice == "Random Forest":
                     processing_placeholder = st.empty()
                     processing_placeholder.text("กำลังประมวลผลข้อมูล...")
 
-                    df['datetime'] = pd.to_datetime(df['datetime']).dt.tz_localize(None)
-
-                    # ปรับค่า end_date เฉพาะถ้าเลือกช่วงเวลาแล้ว
-                    end_date_dt = pd.to_datetime(end_date) + pd.DateOffset(days=1)
+                    # ปรับค่า end_date และ end_time
+                    start_datetime = pd.Timestamp.combine(start_date, start_time)
+                    end_datetime = pd.Timestamp.combine(end_date, end_time)
 
                     # กรองข้อมูลตามช่วงวันที่เลือก
-                    df_filtered = df[(df.index >= pd.to_datetime(start_date)) & (df.index <= pd.to_datetime(end_date_dt))]
+                    df_filtered = df[(df.index >= start_datetime) & (df.index <= end_datetime)]
 
                     if use_second_file and uploaded_file2 and df2 is not None:
                         # ปรับเวลาของสถานีก่อนหน้าตามเวลาห่างที่ระบุ
-                        df2_filtered = df2[(df2.index >= pd.to_datetime(start_date)) & (df2.index <= pd.to_datetime(end_date_dt))]
+                        df2_filtered = df2[(df2.index >= start_date) & (df2.index <= end_date)]
                         df2_filtered.index = df2_filtered.index + total_time_lag
                         df2_clean = clean_data(df2_filtered)
                     else:
@@ -772,7 +707,7 @@ if model_choice == "Random Forest":
                     # ตรวจสอบว่าผู้ใช้เลือกที่จะลบข้อมูลหรือไม่
                     if delete_data_option:
                         delete_start_datetime = pd.to_datetime(f"{delete_start_date} {delete_start_time}")
-                        delete_end_datetime = pd.to_datetime(f"{delete_end_date} {delete_end_time}") + pd.DateOffset(hours=23, minutes=45)
+                        delete_end_datetime = pd.to_datetime(f"{delete_end_date} {delete_end_time}") + pd.DateOffset(minutes=45)
                         df_deleted = delete_data_by_date_range(df_merged, delete_start_datetime, delete_end_datetime)
                     else:
                         df_deleted = df_merged.copy()  # ถ้าไม่เลือกลบก็ใช้ข้อมูลเดิมแทน
@@ -804,6 +739,7 @@ if model_choice == "Random Forest":
 
     else:
         st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วย Random Forest")
+
 elif model_choice == "Linear Regression":
     if uploaded_fill_file:
         # โหลดข้อมูลของสถานีที่ต้องการทำนาย
@@ -852,7 +788,7 @@ elif model_choice == "Linear Regression":
                     upstream_df = None
 
                 # แสดงกราฟข้อมูลจากทั้งสองสถานี
-                if use_upstream and upstream_df is not None:
+                if use_upstream and upstream_df is not None and not upstream_df.empty:
                     # ใช้ฟังก์ชัน plot_data_preview เพื่อแสดงกราฟข้อมูลทั้งสองสถานี
                     plot_data_preview(target_df, upstream_df, pd.Timedelta(hours=delay_hours))
                 else:
@@ -881,16 +817,14 @@ elif model_choice == "Linear Regression":
                                         upstream_data=upstream_df.set_index('datetime'),
                                         forecast_start_date=forecast_start_date_actual,
                                         delay_hours=delay_hours,
-                                        forecast_days=forecast_days,      # ส่งค่าจำนวนวันที่ต้องการพยากรณ์
-                                        training_days=training_days     # ส่งค่าจำนวนวันที่ใช้ในการเทรน
+                                        forecast_days=forecast_days  # ส่งค่าจำนวนวันที่ต้องการพยากรณ์
                                     )
                                 else:
                                     # พยากรณ์ด้วย Linear Regression (สถานีเดียว)
                                     forecasted_data = forecast_with_linear_regression_single(
                                         data=target_df.set_index('datetime'),
                                         forecast_start_date=forecast_start_date_actual,
-                                        forecast_days=forecast_days,       # ส่งค่าจำนวนวันที่ต้องการพยากรณ์
-                                        training_days=training_days       # ส่งค่าจำนวนวันที่ใช้ในการเทรน
+                                        forecast_days=forecast_days  # ส่งค่าจำนวนวันที่ต้องการพยากรณ์
                                     )
 
                                 if not forecasted_data.empty:
