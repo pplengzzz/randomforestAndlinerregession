@@ -377,6 +377,11 @@ def merge_data(df1, df2=None):
 
 # ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression ทีละค่า
 def forecast_with_linear_regression_single(data, forecast_start_date, forecast_days):
+    # ตรวจสอบจำนวนวันที่พยากรณ์ให้อยู่ในขอบเขต 1-30 วัน
+    if forecast_days < 1 or forecast_days > 30:
+        st.error("สามารถพยากรณ์ได้ตั้งแต่ 1 ถึง 30 วัน")
+        return pd.DataFrame()
+
     # กำหนดช่วงเวลาการฝึกโมเดล
     training_data_end = forecast_start_date - pd.Timedelta(minutes=15)
     training_data_start = forecast_start_date - pd.Timedelta(days=forecast_days) + pd.Timedelta(minutes=15)
@@ -442,6 +447,10 @@ def forecast_with_linear_regression_single(data, forecast_start_date, forecast_d
 
         # พยากรณ์ค่า
         forecast_value = model.predict(X_pred_scaled)[0]
+
+        # ป้องกันการกระโดดของค่าพยากรณ์
+        forecast_value = np.clip(forecast_value, combined_data['wl_up'].min(), combined_data['wl_up'].max())
+        
         forecasted_data.at[idx, 'wl_up'] = forecast_value
 
         # อัปเดต 'combined_data' ด้วยค่าที่พยากรณ์เพื่อใช้ในการพยากรณ์ครั้งถัดไป
@@ -451,6 +460,11 @@ def forecast_with_linear_regression_single(data, forecast_start_date, forecast_d
 
 # ฟังก์ชันสำหรับพยากรณ์ด้วย Linear Regression สองสถานี (ถ้ามี)
 def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date, forecast_days, delay_hours):
+    # ตรวจสอบจำนวนวันที่พยากรณ์ให้อยู่ในขอบเขต 1-30 วัน
+    if forecast_days < 1 or forecast_days > 30:
+        st.error("สามารถพยากรณ์ได้ตั้งแต่ 1 ถึง 30 วัน")
+        return pd.DataFrame()
+
     # เตรียมข้อมูลจาก upstream_data
     if not upstream_data.empty:
         upstream_data = upstream_data.copy()
@@ -542,6 +556,10 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
 
         # พยากรณ์ค่า
         forecast_value = model.predict(X_pred_scaled)[0]
+
+        # ป้องกันการกระโดดของค่าพยากรณ์
+        forecast_value = np.clip(forecast_value, combined_data['wl_up'].min(), combined_data['wl_up'].max())
+        
         forecasted_data.at[idx, 'wl_up'] = forecast_value
 
         # อัปเดต 'combined_data' และ 'combined_upstream' ด้วยค่าที่พยากรณ์เพื่อใช้ในการพยากรณ์ครั้งถัดไป
@@ -552,13 +570,24 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
     return forecasted_data
 
 # ฟังก์ชันสำหรับสร้างกราฟข้อมูลพร้อมการพยากรณ์
-def plot_data_combined(data, forecasted=None, label='ระดับน้ำ'):
+def plot_data_combined_two_stations(data, forecasted=None, upstream_data=None, label='ระดับน้ำ'):
     fig = px.line(data, x=data.index, y='wl_up', title=f'ระดับน้ำที่สถานี {label}', labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
     fig.update_traces(connectgaps=False)
+    
+    # แสดงค่าจริงของสถานีที่ต้องการพยากรณ์
+    fig.add_scatter(x=data.index, y=data['wl_up'], mode='lines', name='ค่าจริง (สถานีที่พยากรณ์)', line=dict(color='blue'))
+    
+    # แสดงค่าจริงของสถานี upstream (ถ้ามี)
+    if upstream_data is not None:
+        fig.add_scatter(x=upstream_data.index, y=upstream_data['wl_up'], mode='lines', name='ค่าจริง (สถานี upstream)', line=dict(color='green'))
+
+    # แสดงค่าพยากรณ์
     if forecasted is not None and not forecasted.empty:
         fig.add_scatter(x=forecasted.index, y=forecasted['wl_up'], mode='lines', name='ค่าที่พยากรณ์', line=dict(color='red'))
+    
     fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
     return fig
+
 
 # ฟังก์ชันสำหรับคำนวณค่าความแม่นยำ
 def calculate_error_metrics(original, forecasted):
@@ -839,7 +868,7 @@ elif model_choice == "Linear Regression":
 
                             if not forecasted_data.empty:
                                 st.header("กราฟข้อมูลพร้อมการพยากรณ์", divider='gray')
-                                st.plotly_chart(plot_data_combined(target_df.set_index('datetime'), forecasted_data, label='สถานีที่ต้องการทำนาย'))
+                                st.plotly_chart(plot_data_combined_two_stations(target_df.set_index('datetime'), forecasted_data, label='สถานีที่ต้องการทำนาย'))
 
                                 # ตรวจสอบและคำนวณค่าความแม่นยำ
                                 mae, rmse, actual_forecasted_data = calculate_error_metrics(
