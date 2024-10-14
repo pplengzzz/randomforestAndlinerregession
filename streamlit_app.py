@@ -668,7 +668,7 @@ with st.sidebar:
             training_end_time = st.time_input("เวลาสิ้นสุดฝึกโมเดล", value=pd.Timestamp("23:45:00").time(), key='training_end_time_lr')
 
         with st.sidebar.expander("ตั้งค่าการพยากรณ์", expanded=False):
-            forecast_days = st.number_input("จำนวนวันที่ต้องการพยากรณ์", value=1, min_value=1, step=1)
+            forecast_days = st.number_input("จำนวนวันที่ต้องการพยากรณ์", value=3, min_value=1, step=1)
 
         process_button2 = st.button("ประมวลผล", type="primary")
 
@@ -850,7 +850,7 @@ elif model_choice == "Linear Regression":
                             max_datetime = target_df['datetime'].max()
                             if forecast_end_date_actual > max_datetime:
                                 st.warning("ข้อมูลจริงในช่วงเวลาที่พยากรณ์ไม่ครบถ้วนหรือไม่มีข้อมูล")
-                            
+
                             if use_upstream and upstream_df is not None and not upstream_df.empty:
                                 # พยากรณ์ด้วย Linear Regression (สองสถานี)
                                 forecasted_data = forecast_with_linear_regression_two(
@@ -899,6 +899,7 @@ elif model_choice == "Linear Regression":
                                 st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
     else:
         st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วย Linear Regression")
+
 
 
 
