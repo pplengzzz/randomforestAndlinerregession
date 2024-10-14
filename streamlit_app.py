@@ -374,9 +374,9 @@ def merge_data(df1, df2=None):
         merged_df = df1.copy()
     return merged_df
 
-# ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression (จากโค้ดใหม่)
+# ฟังก์ชันสำหรับพยากรณ์ด้วย Linear Regression ทีละค่า
 def forecast_with_linear_regression_single(data, forecast_start_date, forecast_days):
-    # ใช้ข้อมูลตามช่วงเวลาที่ผู้ใช้เลือกในการเทรนโมเดล
+    # กำหนดช่วงเวลาการฝึกโมเดล
     training_data_end = forecast_start_date - pd.Timedelta(minutes=15)
     training_data_start = forecast_start_date - pd.Timedelta(days=forecast_days) + pd.Timedelta(minutes=15)
 
@@ -416,11 +416,9 @@ def forecast_with_linear_regression_single(data, forecast_start_date, forecast_d
     forecasted_data = pd.DataFrame(index=forecast_index, columns=['wl_up'])
 
     # สร้างชุดข้อมูลสำหรับการพยากรณ์
-    # เราจะไม่เติมค่าใน 'data' เพื่อป้องกันการใช้ค่าที่พยากรณ์มาเติมในการพยากรณ์ครั้งถัดไป
-    # ใช้ 'combined_data' เพื่อรวมข้อมูลจริงและพยากรณ์
     combined_data = data.copy()
 
-    # การพยากรณ์
+    # การพยากรณ์ทีละค่า
     for idx in forecasted_data.index:
         lag_features = {}
         for lag in lags:
@@ -441,6 +439,7 @@ def forecast_with_linear_regression_single(data, forecast_start_date, forecast_d
 
     return forecasted_data
 
+# ฟังก์ชันสำหรับพยากรณ์ด้วย Linear Regression สองสถานี (ถ้ามี)
 def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date, forecast_days, delay_hours):
     # เตรียมข้อมูลจาก upstream_data
     if not upstream_data.empty:
@@ -448,7 +447,7 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
         if delay_hours > 0:
             upstream_data.index = upstream_data.index + pd.Timedelta(hours=delay_hours)
 
-    # ใช้ข้อมูลตามช่วงเวลาที่ผู้ใช้เลือกในการเทรนโมเดล
+    # กำหนดช่วงเวลาการฝึกโมเดล
     training_data_end = forecast_start_date - pd.Timedelta(minutes=15)
     training_data_start = forecast_start_date - pd.Timedelta(days=forecast_days) + pd.Timedelta(minutes=15)
 
@@ -485,7 +484,7 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
     else:
         feature_cols = [f'lag_{lag}' for lag in lags]
     
-    # กำหนดเฉพาะฟีเจอร์ที่มีอยู่จริงในข้อมูลการเทรน (เพื่อป้องกันปัญหา mismatch ของฟีเจอร์)
+    # กำหนดเฉพาะฟีเจอร์ที่มีอยู่จริงในข้อมูลการเทรน
     feature_cols = [col for col in feature_cols if col in training_data.columns]
 
     X_train = training_data[feature_cols]
@@ -501,13 +500,11 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
     forecasted_data = pd.DataFrame(index=forecast_index, columns=['wl_up'])
 
     # สร้างชุดข้อมูลสำหรับการพยากรณ์
-    # เราจะไม่เติมค่าใน 'data' หรือ 'upstream_data' เพื่อป้องกันการใช้ค่าที่พยากรณ์มาเติมในการพยากรณ์ครั้งถัดไป
-    # ใช้ 'combined_data' เพื่อรวมข้อมูลจริงและพยากรณ์
     combined_data = data.copy()
     if not upstream_data.empty:
         combined_upstream = upstream_data.copy()
 
-    # การพยากรณ์
+    # การพยากรณ์ทีละค่า
     for idx in forecasted_data.index:
         lag_features = {}
         for lag in lags:
@@ -516,7 +513,6 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
             if lag_time in combined_data.index and not pd.isnull(combined_data.at[lag_time, 'wl_up']):
                 lag_value = combined_data.at[lag_time, 'wl_up']
             else:
-                # ถ้าไม่มีค่า lag ให้ใช้ค่าเฉลี่ยของ y_train
                 lag_value = y_train.mean()
             lag_features[f'lag_{lag}'] = lag_value
 
@@ -542,7 +538,7 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
 
     return forecasted_data
 
-# ฟังก์ชันสำหรับการแสดงกราฟข้อมูลพร้อมการพยากรณ์
+# ฟังก์ชันสำหรับสร้างกราฟข้อมูลพร้อมการพยากรณ์
 def plot_data_combined(data, forecasted=None, label='ระดับน้ำ'):
     fig = px.line(data, x=data.index, y='wl_up', title=f'ระดับน้ำที่สถานี {label}', labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
     fig.update_traces(connectgaps=False)
@@ -551,7 +547,7 @@ def plot_data_combined(data, forecasted=None, label='ระดับน้ำ'):
     fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
     return fig
 
-# ฟังก์ชันสำหรับการคำนวณค่า MAE และ RMSE (จากโค้ดใหม่)
+# ฟังก์ชันสำหรับคำนวณค่าความแม่นยำ
 def calculate_error_metrics(original, forecasted):
     # เปลี่ยน index ของ forecasted เป็น 'datetime' หากยังไม่ใช่
     if forecasted.index.name != 'datetime':
@@ -577,14 +573,64 @@ def calculate_error_metrics(original, forecasted):
 
     return mae, rmse, actual_forecasted_data
 
-# ฟังก์ชันสำหรับการสร้างตารางเปรียบเทียบ (จากโค้ดใหม่)
+# ฟังก์ชันสำหรับแสดงตารางเปรียบเทียบ
 def create_comparison_table_streamlit(forecasted_data, actual_data):
     comparison_df = pd.DataFrame({
-        'Datetime': actual_data.index,
-        'ค่าจริง': actual_data['wl_up'],
-        'ค่าที่พยากรณ์': forecasted_data['wl_up'].loc[actual_data.index]
+        'Datetime': actual_data['datetime'],
+        'ค่าจริง': actual_data['Actual'],
+        'ค่าที่พยากรณ์': actual_data['Forecasted']
     })
     return comparison_df
+
+# ฟังก์ชันสำหรับแสดงกราฟตัวอย่างข้อมูล
+def plot_data_preview(df_pre, df2_pre, total_time_lag):
+    data_pre1 = pd.DataFrame({
+        'datetime': df_pre['datetime'],
+        'สถานีที่ต้องการทำนาย': df_pre['wl_up']
+    })
+
+    if df2_pre is not None:
+        data_pre2 = pd.DataFrame({
+            'datetime': df2_pre['datetime'] + total_time_lag,  # ขยับวันที่ของสถานีก่อนหน้าตามเวลาห่างที่ระบุ
+            'สถานีก่อนหน้า': df2_pre['wl_up']
+        })
+        combined_data_pre = pd.merge(data_pre1, data_pre2, on='datetime', how='outer')
+
+        # Plot ด้วย Plotly และกำหนด color_discrete_sequence
+        fig = px.line(
+            combined_data_pre, 
+            x='datetime', 
+            y=['สถานีที่ต้องการทำนาย', 'สถานีก่อนหน้า'],
+            labels={'value': 'ระดับน้ำ (wl_up)', 'variable': 'ประเภทข้อมูล'},
+            title='ข้อมูลจากทั้งสองสถานี',
+            color_discrete_sequence=px.colors.qualitative.Plotly
+        )
+
+        fig.update_layout(
+            xaxis_title="วันที่", 
+            yaxis_title="ระดับน้ำ (wl_up)"
+        )
+
+        # แสดงกราฟ
+        st.plotly_chart(fig, use_container_width=True)
+
+    else:
+        # ถ้าไม่มีไฟล์ที่สอง ให้แสดงกราฟของไฟล์แรกเท่านั้น
+        fig = px.line(
+            data_pre1, 
+            x='datetime', 
+            y='สถานีที่ต้องการทำนาย',
+            labels={'สถานีที่ต้องการทำนาย': 'ระดับน้ำ (wl_up)'},
+            title='ข้อมูลสถานีที่ต้องการทำนาย',
+            color_discrete_sequence=px.colors.qualitative.Plotly
+        )
+
+        fig.update_layout(
+            xaxis_title="วันที่", 
+            yaxis_title="ระดับน้ำ (wl_up)"
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
 
 # Streamlit UI
 st.set_page_config(
