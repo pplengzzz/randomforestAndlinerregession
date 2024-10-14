@@ -617,7 +617,7 @@ with st.sidebar:
         process_button = st.button("ประมวลผล", type="primary")
 
     elif model_choice == "Linear Regression":
-        with st.sidebar.expander("ตั้งค่า Linear Regression", expanded=False):
+        with st.sidebar.expander("ตั้งค่าอัฟโหลดไฟล์ Linear Regression", expanded=False):
             use_upstream = st.checkbox("ต้องการใช้สถานีใกล้เคียง", value=False)
 
             if use_upstream:
