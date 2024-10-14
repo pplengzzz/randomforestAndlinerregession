@@ -458,7 +458,8 @@ def forecast_with_linear_regression_single(data, forecast_start_date, forecast_d
 
     return forecasted_data
 
-# ฟังก์ชันสำหรับพยากรณ์ด้วย Linear Regression สองสถานี (ถ้ามี)
+
+# ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression สำหรับสองสถานี
 def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date, forecast_days, delay_hours):
     # ตรวจสอบจำนวนวันที่พยากรณ์ให้อยู่ในขอบเขต 1-30 วัน
     if forecast_days < 1 or forecast_days > 30:
