@@ -35,42 +35,12 @@ def load_data(file):
     finally:
         message_placeholder.empty()  # ลบข้อความแจ้งเตือนเมื่อเสร็จสิ้นการโหลดไฟล์
 
-# def fix_outliers_based_on_neighbors(data, threshold=0.5, decimal_threshold=0.01):
-#     # คำนวณค่าเฉลี่ยระหว่างค่าแถวก่อนหน้าและแถวถัดไป
-#     data['avg_neighbors'] = (data['wl_up'].shift(1) + data['wl_up'].shift(-1)) / 2
-    
-#     # คำนวณความแตกต่างระหว่างค่าปัจจุบันกับค่าเฉลี่ยของแถวข้างเคียง
-#     data['diff_avg'] = (data['wl_up'] - data['avg_neighbors']).abs()
-    
-#     # ระบุแถวที่เป็น outlier โดยอิงตาม threshold ทั่วไป
-#     large_outlier_condition = data['diff_avg'] > threshold
-    
-#     # ระบุแถวที่เป็น outlier โดยอิงตามความแตกต่างเล็กน้อย (decimal threshold)
-#     small_outlier_condition = (data['diff_avg'] > decimal_threshold) & (data['diff_avg'] <= threshold)
-    
-#     # รวมเงื่อนไขการตรวจจับ outlier
-#     outlier_condition = large_outlier_condition | small_outlier_condition
-    
-#     # ตั้งค่า NaN สำหรับค่า wl_up ที่เป็น outlier
-#     data.loc[outlier_condition, 'wl_up'] = np.nan
-    
-#     # ใช้ interpolation เพื่อเติมค่าที่เป็น NaN
-#     data['wl_up'] = data['wl_up'].interpolate(method='linear')
-    
-#     # ลบคอลัมน์ที่ไม่ต้องการหลังจากการประมวลผล
-#     data.drop(columns=['avg_neighbors', 'diff_avg'], inplace=True)
-    
-#     return data
-
 def clean_data(df):
     data_clean = df.copy()
     data_clean['datetime'] = pd.to_datetime(data_clean['datetime'], errors='coerce')
     data_clean = data_clean.dropna(subset=['datetime'])
     data_clean = data_clean[(data_clean['wl_up'] >= -100)]
     data_clean = data_clean[(data_clean['wl_up'] != 0) & (~data_clean['wl_up'].isna())]
-    
-    # เรียกใช้ฟังก์ชันเพื่อจัดการกับค่า outliers ตามค่าเฉลี่ยของแถวข้างเคียง
-    # data_clean = fix_outliers_based_on_neighbors(data_clean)
     
     return data_clean
 
@@ -151,7 +121,6 @@ def train_linear_regression_model(X_train, y_train):
     model.fit(X_train, y_train)
     return model
 
-# ฟังก์ชันเพิ่มเติมจากโค้ดแรก
 def generate_missing_dates(data):
     full_date_range = pd.date_range(start=data['datetime'].min(), end=data['datetime'].max(), freq='15T')
     all_dates = pd.DataFrame(full_date_range, columns=['datetime'])
@@ -686,7 +655,6 @@ def plot_data_preview(df_pre, df2_pre, total_time_lag):
 
         st.plotly_chart(fig, use_container_width=True)
 
-# ฟังก์ชันสำหรับรวมข้อมูลจากสองสถานี
 def merge_data(df1, df2=None):
     if df2 is not None:
         merged_df = pd.merge(df1, df2[['datetime', 'wl_up']], on='datetime', how='left', suffixes=('', '_prev'))
@@ -727,11 +695,11 @@ with st.sidebar:
             
             # สลับตำแหน่งการอัปโหลดไฟล์
             if use_second_file:
-                uploaded_file2 = st.file_uploader("ข้อมูลระดับที่ใช้ฝึกโมเดล", type="csv", key="uploader2")
-                uploaded_file = st.file_uploader("ข้อมูลระดับน้ำที่ต้องการทำนาย", type="csv", key="uploader1")
+                uploaded_file2 = st.file_uploader("ข้อมูลระดับที่ใช้ฝึกโมเดล", type="csv", key="uploader2_rf")
+                uploaded_file = st.file_uploader("ข้อมูลระดับน้ำที่ต้องการทำนาย", type="csv", key="uploader1_rf")
             else:
                 uploaded_file2 = None  # กำหนดให้เป็น None ถ้าไม่ใช้ไฟล์ที่สอง
-                uploaded_file = st.file_uploader("ข้อมูลระดับน้ำที่ต้องการทำนาย", type="csv", key="uploader1")
+                uploaded_file = st.file_uploader("ข้อมูลระดับน้ำที่ต้องการทำนาย", type="csv", key="uploader1_rf")
 
             # เพิ่มช่องกรอกเวลาห่างระหว่างสถานี ถ้าใช้ไฟล์ที่สอง
             if use_second_file:
@@ -919,6 +887,7 @@ if model_choice == "Linear Regression":
                                 st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
     else:
         st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วย Linear Regression")
+
 
 
 
