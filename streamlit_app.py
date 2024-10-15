@@ -375,7 +375,7 @@ def merge_data(df1, df2=None):
         merged_df = df1.copy()
     return merged_df
 
-# ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression ทีละค่า
+# ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression ทีละค่า (สถานีเดียว)
 def forecast_with_linear_regression_single(data, forecast_start_date, forecast_days):
     # ตรวจสอบจำนวนวันที่พยากรณ์ให้อยู่ในขอบเขต 1-30 วัน
     if forecast_days < 1 or forecast_days > 30:
@@ -384,7 +384,7 @@ def forecast_with_linear_regression_single(data, forecast_start_date, forecast_d
 
     # กำหนดช่วงเวลาการฝึกโมเดล
     training_data_end = forecast_start_date - pd.Timedelta(minutes=15)
-    training_data_start = forecast_start_date - pd.Timedelta(days=forecast_days) + pd.Timedelta(minutes=15)
+    training_data_start = forecast_start_date - pd.Timedelta(days=30) + pd.Timedelta(minutes=15)  # ใช้ข้อมูลย้อนหลัง 30 วันในการเทรนโมเดล
 
     # ตรวจสอบว่ามีข้อมูลเพียงพอหรือไม่
     if training_data_start < data.index.min():
@@ -458,7 +458,6 @@ def forecast_with_linear_regression_single(data, forecast_start_date, forecast_d
 
     return forecasted_data
 
-
 # ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression สำหรับสองสถานี
 def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date, forecast_days, delay_hours):
     # ตรวจสอบจำนวนวันที่พยากรณ์ให้อยู่ในขอบเขต 1-30 วัน
@@ -474,7 +473,7 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
 
     # กำหนดช่วงเวลาการฝึกโมเดล
     training_data_end = forecast_start_date - pd.Timedelta(minutes=15)
-    training_data_start = forecast_start_date - pd.Timedelta(days=forecast_days) + pd.Timedelta(minutes=15)
+    training_data_start = forecast_start_date - pd.Timedelta(days=30) + pd.Timedelta(minutes=15)  # ใช้ข้อมูลย้อนหลัง 30 วันในการเทรนโมเดล
 
     if training_data_start < data.index.min():
         st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลสำหรับการเทรนไม่เพียงพอ")
