@@ -305,8 +305,15 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
 
 # ฟังก์ชันสำหรับสร้างกราฟข้อมูลจากสถานีทั้งสอง (สำหรับ Linear Regression)
 def plot_data_combined_LR_stations(data, forecasted=None, upstream_data=None, downstream_data=None, label='ระดับน้ำ'):
+    # กำหนดช่วงเวลาที่จะรวมในกราฟ (ตั้งแต่วันแรกที่เทรนจนถึงวันสุดท้ายที่พยากรณ์)
+    full_data_start = data.index.min()
+    forecast_end = forecasted.index.max() if forecasted is not None else data.index.max()
+    
+    # ข้อมูลจริงตั้งแต่วันแรกที่เทรนจนถึงวันสุดท้ายของการพยากรณ์
+    full_data_period = data[(data.index >= full_data_start) & (data.index <= forecast_end)]
+
     # กราฟแรก: ข้อมูลจริง
-    fig_actual = px.line(data, x=data.index, y='wl_up', title=f'ระดับน้ำจริงที่สถานี {label}', labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
+    fig_actual = px.line(full_data_period, x=full_data_period.index, y='wl_up', title=f'ระดับน้ำจริงที่สถานี {label}', labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
     fig_actual.update_traces(connectgaps=False, name='สถานีที่ต้องการพยากรณ์')
     
     # แสดงค่าจริงของสถานี Upstream (ถ้ามี)
@@ -323,7 +330,6 @@ def plot_data_combined_LR_stations(data, forecasted=None, upstream_data=None, do
     if forecasted is not None and not forecasted.empty:
         # กำหนดช่วงเวลาพยากรณ์
         forecast_start = forecasted.index.min()
-        forecast_end = forecasted.index.max()
         actual_forecast_period = data[(data.index >= forecast_start) & (data.index <= forecast_end)]
         
         fig_forecast = px.line(forecasted, x=forecasted.index, y='wl_up', title='ระดับน้ำที่พยากรณ์', labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
@@ -341,6 +347,7 @@ def plot_data_combined_LR_stations(data, forecasted=None, upstream_data=None, do
     st.plotly_chart(fig_actual, use_container_width=True)
     if fig_forecast is not None:
         st.plotly_chart(fig_forecast, use_container_width=True)
+
 
 # ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression ทีละค่า (สถานีเดียว)
 def forecast_with_linear_regression_single(data, forecast_start_date, forecast_days):
