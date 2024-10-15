@@ -87,7 +87,7 @@ def prepare_features(data_clean):
 # ฟังก์ชันสำหรับฝึกและประเมินโมเดล
 def train_and_evaluate_model(X, y, model_type='random_forest'):
     # แบ่งข้อมูลเป็นชุดฝึกและชุดทดสอบ
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle=False)
 
     # ฝึกโมเดลด้วยชุดฝึก
     if model_type == 'random_forest':
@@ -240,10 +240,15 @@ def calculate_accuracy_metrics(original, filled):
         st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่า MAE และ RMSE ได้")
         return None, None, None, merged_data
 
-    # คำนวณค่าความแม่นยำ
-    mse = mean_squared_error(merged_data['wl_up'], merged_data['wl_up2'])
-    mae = mean_absolute_error(merged_data['wl_up'], merged_data['wl_up2'])
-    r2 = r2_score(merged_data['wl_up'], merged_data['wl_up2'])
+    # ตรวจสอบความสัมพันธ์เบื้องต้นระหว่างค่าจริงและค่าพยากรณ์
+    if merged_data['wl_up'].std() == 0:
+        st.warning("ค่าจริงมีค่าเท่ากันทั้งหมด ไม่สามารถคำนวณค่า R² ได้")
+        r2 = None
+    else:
+        # คำนวณค่าความแม่นยำ
+        mse = mean_squared_error(merged_data['wl_up'], merged_data['wl_up2'])
+        mae = mean_absolute_error(merged_data['wl_up'], merged_data['wl_up2'])
+        r2 = r2_score(merged_data['wl_up'], merged_data['wl_up2'])
 
     return mse, mae, r2, merged_data
 
@@ -357,83 +362,7 @@ def plot_data_combined_LR_stations(data, forecasted=None, upstream_data=None, do
     if fig_forecast is not None:
         st.plotly_chart(fig_forecast, use_container_width=True)
 
-# ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression ทีละค่า (สถานีเดียว)
-def forecast_with_linear_regression_single(data, forecast_start_date, forecast_days):
-    # ตรวจสอบจำนวนวันที่พยากรณ์ให้อยู่ในขอบเขต 1-30 วัน
-    if forecast_days < 1 or forecast_days > 30:
-        st.error("สามารถพยากรณ์ได้ตั้งแต่ 1 ถึง 30 วัน")
-        return pd.DataFrame()
-
-    # กำหนดช่วงเวลาการฝึกโมเดล
-    training_data_end = forecast_start_date - pd.Timedelta(minutes=15)
-    training_data_start = forecast_start_date - pd.Timedelta(days=30) + pd.Timedelta(minutes=15)  # ใช้ข้อมูลย้อนหลัง 30 วันในการเทรนโมเดล
-
-    # ตรวจสอบว่ามีข้อมูลเพียงพอหรือไม่
-    if training_data_start < data.index.min():
-        st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลสำหรับการเทรนไม่เพียงพอ")
-        return pd.DataFrame()
-
-    # สร้างชุดข้อมูลสำหรับการเทรน
-    training_data = data.loc[training_data_start:training_data_end].copy()
-
-    # สร้างฟีเจอร์ lag
-    lags = [1, 4, 96, 192]  # lag 15 นาที, 1 ชั่วโมง, 1 วัน, 2 วัน
-    for lag in lags:
-        training_data[f'lag_{lag}'] = training_data['wl_up'].shift(lag)
-
-    # เติมค่า NaN ด้วยค่าเฉลี่ยของ y_train ก่อนการเทรน
-    training_data.fillna(method='ffill', inplace=True)
-    training_data.dropna(inplace=True)
-
-    # ตรวจสอบว่ามีข้อมูลเพียงพอหลังจากสร้างฟีเจอร์ lag
-    if training_data.empty:
-        st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอหลังจากสร้างฟีเจอร์ lag")
-        return pd.DataFrame()
-
-    # กำหนดฟีเจอร์และตัวแปรเป้าหมาย
-    feature_cols = [f'lag_{lag}' for lag in lags]
-    X_train = training_data[feature_cols]
-    y_train = training_data['wl_up']
-
-    # เทรนโมเดล Linear Regression
-    model = LinearRegression()
-    model.fit(X_train, y_train)
-
-    # สร้าง DataFrame สำหรับการพยากรณ์
-    forecast_periods = forecast_days * 96  # พยากรณ์ตามจำนวนวันที่เลือก (96 ช่วงเวลา 15 นาทีต่อวัน)
-    forecast_index = pd.date_range(start=forecast_start_date, periods=forecast_periods, freq='15T')
-    forecasted_data = pd.DataFrame(index=forecast_index, columns=['wl_up'])
-
-    # สร้างชุดข้อมูลสำหรับการพยากรณ์
-    combined_data = data.copy()
-
-    # การพยากรณ์ทีละค่า
-    for idx in forecasted_data.index:
-        lag_features = {}
-        for lag in lags:
-            lag_time = idx - pd.Timedelta(minutes=15 * lag)
-            if lag_time in combined_data.index and not pd.isnull(combined_data.at[lag_time, 'wl_up']):
-                lag_features[f'lag_{lag}'] = combined_data.at[lag_time, 'wl_up']
-            else:
-                lag_features[f'lag_{lag}'] = y_train.mean()
-
-        # เตรียมข้อมูลสำหรับการพยากรณ์
-        X_pred = pd.DataFrame([lag_features], columns=feature_cols)
-
-        # พยากรณ์ค่า
-        forecast_value = model.predict(X_pred)[0]
-
-        # ป้องกันการกระโดดของค่าพยากรณ์
-        forecast_value = np.clip(forecast_value, combined_data['wl_up'].min(), combined_data['wl_up'].max())
-        
-        forecasted_data.at[idx, 'wl_up'] = forecast_value
-
-        # อัปเดต 'combined_data' ด้วยค่าที่พยากรณ์เพื่อใช้ในการพยากรณ์ครั้งถัดไป
-        combined_data.at[idx, 'wl_up'] = forecast_value
-
-    return forecasted_data
-
-# ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression สำหรับหลายสถานี (upstream และ downstream ถ้ามี)
+# ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression ทีละค่า (Recursive Forecasting)
 def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_days, upstream_data=None, downstream_data=None, delay_hours_up=0, delay_hours_down=0):
     # ตรวจสอบจำนวนวันที่พยากรณ์ให้อยู่ในขอบเขต 1-30 วัน
     if forecast_days < 1 or forecast_days > 30:
@@ -526,9 +455,10 @@ def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_da
             # พยากรณ์ค่า
             forecast_value = model.predict(X_pred)[0]
 
-            # ป้องกันการกระโดดของค่าพยากรณ์
+            # ป้องกันการกระโดดของค่าพยากรณ์ (optional)
             forecast_value = np.clip(forecast_value, combined_data['wl_up'].min(), combined_data['wl_up'].max())
-            
+
+            # บันทึกค่าพยากรณ์
             forecasted_data.at[idx, 'wl_up'] = forecast_value
 
             # อัปเดต 'combined_data' ด้วยค่าที่พยากรณ์เพื่อใช้ในการพยากรณ์ครั้งถัดไป
@@ -595,19 +525,17 @@ with st.sidebar:
                 if use_upstream_rf:
                     delay_days_up_rf = st.number_input("ระบุเวลาห่างระหว่างสถานี Upstream (วัน)", value=0, min_value=0)
                     delay_hours_up_rf = delay_days_up_rf * 24  # แปลงวันเป็นชั่วโมง
-                    total_time_lag_up_rf = pd.Timedelta(days=delay_days_up_rf)
                 else:
-                    total_time_lag_up_rf = pd.Timedelta(days=0)
+                    delay_days_up_rf = 0
 
                 if use_downstream_rf:
                     delay_days_down_rf = st.number_input("ระบุเวลาห่างระหว่างสถานี Downstream (วัน)", value=0, min_value=0)
                     delay_hours_down_rf = delay_days_down_rf * 24  # แปลงวันเป็นชั่วโมง
-                    total_time_lag_down_rf = pd.Timedelta(days=delay_days_down_rf)
                 else:
-                    total_time_lag_down_rf = pd.Timedelta(days=0)
+                    delay_days_down_rf = 0
             else:
-                total_time_lag_up_rf = pd.Timedelta(days=0)
-                total_time_lag_down_rf = pd.Timedelta(days=0)
+                delay_days_up_rf = 0
+                delay_days_down_rf = 0
 
             # อัปโหลดไฟล์หลัก
             uploaded_file_rf = st.file_uploader("ข้อมูลระดับน้ำที่ต้องการทำนาย", type="csv", key="uploader1_rf")
@@ -661,18 +589,16 @@ with st.sidebar:
             if use_nearby_lr:
                 if use_upstream_lr:
                     delay_hours_up_lr = st.number_input("ระบุเวลาห่างระหว่างสถานี Upstream (ชั่วโมง)", value=0, min_value=0)
-                    total_time_lag_up_lr = pd.Timedelta(hours=delay_hours_up_lr)
                 else:
-                    total_time_lag_up_lr = pd.Timedelta(hours=0)
+                    delay_hours_up_lr = 0
 
                 if use_downstream_lr:
                     delay_hours_down_lr = st.number_input("ระบุเวลาห่างระหว่างสถานี Downstream (ชั่วโมง)", value=0, min_value=0)
-                    total_time_lag_down_lr = pd.Timedelta(hours=delay_hours_down_lr)
                 else:
-                    total_time_lag_down_lr = pd.Timedelta(hours=0)
+                    delay_hours_down_lr = 0
             else:
-                total_time_lag_up_lr = pd.Timedelta(hours=0)
-                total_time_lag_down_lr = pd.Timedelta(hours=0)
+                delay_hours_up_lr = 0
+                delay_hours_down_lr = 0
 
             # อัปโหลดไฟล์หลัก
             uploaded_fill_lr = st.file_uploader("ข้อมูลสถานีที่ต้องการพยากรณ์", type="csv", key="uploader_fill_lr")
@@ -844,7 +770,7 @@ elif model_choice == "Linear Regression":
                             if forecast_end_date_actual_lr > max_datetime_lr:
                                 st.warning("ข้อมูลจริงในช่วงเวลาที่พยากรณ์ไม่ครบถ้วนหรือไม่มีข้อมูล")
 
-                            # ใช้ฟังก์ชันพยากรณ์ทีละค่า
+                            # ใช้ฟังก์ชันพยากรณ์ทีละค่า (Recursive Forecasting)
                             forecasted_data_lr = forecast_with_linear_regression_multi(
                                 data=target_df_lr.set_index('datetime'),
                                 forecast_start_date=forecast_start_date_actual_lr,
@@ -858,10 +784,10 @@ elif model_choice == "Linear Regression":
                             if not forecasted_data_lr.empty:
                                 st.header("กราฟข้อมูลพร้อมการพยากรณ์ (Linear Regression)")
                                 plot_data_combined_LR_stations(
-                                    target_df_lr.set_index('datetime'), 
-                                    forecasted_data_lr, 
-                                    upstream_df_lr.set_index('datetime') if upstream_df_lr is not None else None, 
-                                    downstream_df_lr.set_index('datetime') if downstream_df_lr is not None else None, 
+                                    data=target_df_lr.set_index('datetime'), 
+                                    forecasted=forecasted_data_lr, 
+                                    upstream_data=upstream_df_lr.set_index('datetime') if upstream_df_lr is not None else None, 
+                                    downstream_data=downstream_df_lr.set_index('datetime') if downstream_df_lr is not None else None, 
                                     label='สถานีที่ต้องการพยากรณ์'
                                 )
                                 st.markdown("---")  # สร้างเส้นแบ่ง
@@ -895,6 +821,7 @@ elif model_choice == "Linear Regression":
                                 st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
         else:
             st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
+
 
 
 
