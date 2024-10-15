@@ -241,7 +241,7 @@ def calculate_accuracy_metrics(original, filled):
     mae = mean_absolute_error(merged_data['wl_up'], merged_data['wl_up2'])
     r2 = r2_score(merged_data['wl_up'], merged_data['wl_up2'])
 
-    st.header("ผลค่าความแม่นยำ", )
+    st.header("ผลค่าความแม่นยำ")
     st.markdown("---")  # สร้างเส้นแบ่ง
 
     col1, col2, col3 = st.columns(3)
@@ -408,7 +408,7 @@ def forecast_with_linear_regression_single(data, forecast_start_date, forecast_d
             lag_features[f'lag_{lag}'] = lag_value
 
         # เตรียมข้อมูลสำหรับการพยากรณ์
-        X_pred = pd.DataFrame([lag_features])
+        X_pred = pd.DataFrame([lag_features], columns=feature_cols)
 
         # พยากรณ์ค่า
         forecast_value = model.predict(X_pred)[0]
@@ -430,60 +430,47 @@ def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_da
         st.error("สามารถพยากรณ์ได้ตั้งแต่ 1 ถึง 30 วัน")
         return pd.DataFrame()
 
+    lags = [1, 4, 96, 192]  # lag 15 นาที, 1 ชั่วโมง, 1 วัน, 2 วัน
+
+    # กำหนดฟีเจอร์ให้คงที่เสมอ
+    feature_cols = [f'lag_{lag}' for lag in lags] + \
+                   [f'lag_{lag}_upstream' for lag in lags] + \
+                   [f'lag_{lag}_downstream' for lag in lags]
+
     # เตรียมข้อมูลจาก upstream_data ถ้ามี
     if upstream_data is not None and not upstream_data.empty:
         upstream_data = upstream_data.copy()
         if delay_hours_up > 0:
             upstream_data.index = upstream_data.index + pd.Timedelta(hours=delay_hours_up)
+    else:
+        # สร้าง DataFrame เปล่าสำหรับ upstream
+        upstream_data = pd.DataFrame({'wl_up': [0]*len(data)}, index=data.index)
 
     # เตรียมข้อมูลจาก downstream_data ถ้ามี
     if downstream_data is not None and not downstream_data.empty:
         downstream_data = downstream_data.copy()
         if delay_hours_down > 0:
             downstream_data.index = downstream_data.index + pd.Timedelta(hours=delay_hours_down)
-
-    # กำหนดช่วงเวลาการฝึกโมเดล
-    training_data_end = forecast_start_date - pd.Timedelta(minutes=15)
-    training_data_start = forecast_start_date - pd.Timedelta(days=30) + pd.Timedelta(minutes=15)  # ใช้ข้อมูลย้อนหลัง 30 วันในการเทรนโมเดล
-
-    if training_data_start < data.index.min():
-        st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลสำหรับการเทรนไม่เพียงพอ")
-        return pd.DataFrame()
+    else:
+        # สร้าง DataFrame เปล่าสำหรับ downstream
+        downstream_data = pd.DataFrame({'wl_up': [0]*len(data)}, index=data.index)
 
     # สร้างชุดข้อมูลสำหรับการเทรน
-    training_data = data.loc[training_data_start:training_data_end].copy()
-
-    # รวมข้อมูลจาก upstream และ downstream ถ้ามี
-    if upstream_data is not None:
-        training_data = training_data.join(upstream_data[['wl_up']], rsuffix='_upstream')
-    if downstream_data is not None:
-        training_data = training_data.join(downstream_data[['wl_up']], rsuffix='_downstream')
+    training_data = data.copy()
+    training_data = training_data.join(upstream_data[['wl_up']], rsuffix='_upstream')
+    training_data = training_data.join(downstream_data[['wl_up']], rsuffix='_downstream')
 
     # สร้างฟีเจอร์ lag
-    lags = [1, 4, 96, 192]  # lag 15 นาที, 1 ชั่วโมง, 1 วัน, 2 วัน
     for lag in lags:
         training_data[f'lag_{lag}'] = training_data['wl_up'].shift(lag)
-        if upstream_data is not None:
-            training_data[f'lag_{lag}_upstream'] = training_data['wl_up_upstream'].shift(lag)
-        if downstream_data is not None:
-            training_data[f'lag_{lag}_downstream'] = training_data['wl_up_downstream'].shift(lag)
+        training_data[f'lag_{lag}_upstream'] = training_data['wl_up_upstream'].shift(lag)
+        training_data[f'lag_{lag}_downstream'] = training_data['wl_up_downstream'].shift(lag)
 
     # เติมค่า NaN ด้วยค่าเฉลี่ยของ y_train ก่อนการเทรน
     training_data.fillna(method='ffill', inplace=True)
     training_data.dropna(inplace=True)
 
-    # ตรวจสอบว่ามีข้อมูลเพียงพอหลังจากสร้างฟีเจอร์ lag
-    if training_data.empty:
-        st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอหลังจากสร้างฟีเจอร์ lag")
-        return pd.DataFrame()
-
     # กำหนดฟีเจอร์และตัวแปรเป้าหมาย
-    feature_cols = [f'lag_{lag}' for lag in lags]
-    if upstream_data is not None:
-        feature_cols += [f'lag_{lag}_upstream' for lag in lags]
-    if downstream_data is not None:
-        feature_cols += [f'lag_{lag}_downstream' for lag in lags]
-
     X_train = training_data[feature_cols]
     y_train = training_data['wl_up']
 
@@ -498,10 +485,8 @@ def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_da
 
     # สร้างชุดข้อมูลสำหรับการพยากรณ์
     combined_data = data.copy()
-    if upstream_data is not None:
-        combined_upstream = upstream_data.copy()
-    if downstream_data is not None:
-        combined_downstream = downstream_data.copy()
+    combined_upstream = upstream_data.copy()
+    combined_downstream = downstream_data.copy()
 
     # การพยากรณ์ทีละค่า
     for idx in forecasted_data.index:
@@ -510,44 +495,36 @@ def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_da
             lag_time = idx - pd.Timedelta(minutes=15 * lag)
             # ค่า lag ของสถานีหลัก
             if lag_time in combined_data.index and not pd.isnull(combined_data.at[lag_time, 'wl_up']):
-                lag_value = combined_data.at[lag_time, 'wl_up']
+                lag_features[f'lag_{lag}'] = combined_data.at[lag_time, 'wl_up']
             else:
-                lag_value = y_train.mean()
-            lag_features[f'lag_{lag}'] = lag_value
-
+                lag_features[f'lag_{lag}'] = y_train.mean()
             # ค่า lag ของ upstream
-            if upstream_data is not None:
-                if lag_time in combined_upstream.index and not pd.isnull(combined_upstream.at[lag_time, 'wl_up']):
-                    lag_value_upstream = combined_upstream.at[lag_time, 'wl_up']
-                else:
-                    lag_value_upstream = y_train.mean()
-                lag_features[f'lag_{lag}_upstream'] = lag_value_upstream
-
+            if lag_time in combined_upstream.index and not pd.isnull(combined_upstream.at[lag_time, 'wl_up']):
+                lag_features[f'lag_{lag}_upstream'] = combined_upstream.at[lag_time, 'wl_up']
+            else:
+                lag_features[f'lag_{lag}_upstream'] = y_train.mean()
             # ค่า lag ของ downstream
-            if downstream_data is not None:
-                if lag_time in combined_downstream.index and not pd.isnull(combined_downstream.at[lag_time, 'wl_up']):
-                    lag_value_downstream = combined_downstream.at[lag_time, 'wl_up']
-                else:
-                    lag_value_downstream = y_train.mean()
-                lag_features[f'lag_{lag}_downstream'] = lag_value_downstream
+            if lag_time in combined_downstream.index and not pd.isnull(combined_downstream.at[lag_time, 'wl_up']):
+                lag_features[f'lag_{lag}_downstream'] = combined_downstream.at[lag_time, 'wl_up']
+            else:
+                lag_features[f'lag_{lag}_downstream'] = y_train.mean()
 
         # เตรียมข้อมูลสำหรับการพยากรณ์
-        X_pred = pd.DataFrame([lag_features])
+        X_pred = pd.DataFrame([lag_features], columns=feature_cols)
 
-        # พยากรณ์ค่า
-        forecast_value = model.predict(X_pred)[0]
+        try:
+            # พยากรณ์ค่า
+            forecast_value = model.predict(X_pred)[0]
 
-        # ป้องกันการกระโดดของค่าพยากรณ์
-        forecast_value = np.clip(forecast_value, combined_data['wl_up'].min(), combined_data['wl_up'].max())
-        
-        forecasted_data.at[idx, 'wl_up'] = forecast_value
+            # ป้องกันการกระโดดของค่าพยากรณ์
+            forecast_value = np.clip(forecast_value, combined_data['wl_up'].min(), combined_data['wl_up'].max())
+            
+            forecasted_data.at[idx, 'wl_up'] = forecast_value
 
-        # อัปเดต 'combined_data' และสถานีอื่นๆ ด้วยค่าที่พยากรณ์เพื่อใช้ในการพยากรณ์ครั้งถัดไป
-        combined_data.at[idx, 'wl_up'] = forecast_value
-        if upstream_data is not None:
-            combined_upstream.at[idx, 'wl_up'] = lag_features.get(f'lag_{lag}_upstream', y_train.mean())
-        if downstream_data is not None:
-            combined_downstream.at[idx, 'wl_up'] = lag_features.get(f'lag_{lag}_downstream', y_train.mean())
+            # อัปเดต 'combined_data' ด้วยค่าที่พยากรณ์เพื่อใช้ในการพยากรณ์ครั้งถัดไป
+            combined_data.at[idx, 'wl_up'] = forecast_value
+        except Exception as e:
+            st.warning(f"ไม่สามารถพยากรณ์ค่าในเวลา {idx} ได้: {e}")
 
     return forecasted_data
 
@@ -911,6 +888,7 @@ elif model_choice == "Linear Regression":
                                     st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
         else:
             st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
+
 
 
 
