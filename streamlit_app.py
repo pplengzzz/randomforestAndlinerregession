@@ -236,21 +236,14 @@ def calculate_accuracy_metrics(original, filled):
     # ลบข้อมูลที่มี NaN ออก
     merged_data = merged_data.dropna(subset=['wl_up', 'wl_up2'])
 
+    if merged_data.empty:
+        st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่า MAE และ RMSE ได้")
+        return None, None, None, merged_data
+
     # คำนวณค่าความแม่นยำ
     mse = mean_squared_error(merged_data['wl_up'], merged_data['wl_up2'])
     mae = mean_absolute_error(merged_data['wl_up'], merged_data['wl_up2'])
     r2 = r2_score(merged_data['wl_up'], merged_data['wl_up2'])
-
-    st.header("ผลค่าความแม่นยำ")
-    st.markdown("---")  # สร้างเส้นแบ่ง
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric(label="Mean Squared Error (MSE)", value=f"{mse:.4f}")
-    with col2:
-        st.metric(label="Mean Absolute Error (MAE)", value=f"{mae:.4f}")
-    with col3:
-        st.metric(label="R-squared (R²)", value=f"{r2:.4f}")
 
     return mse, mae, r2, merged_data
 
@@ -310,40 +303,30 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
     data_filled_selected = data_filled[['datetime', 'wl_up', 'wl_forecast', 'timestamp']]
     st.dataframe(data_filled_selected, use_container_width=True)
 
-    # ตรวจสอบว่ามีค่าจริงให้เปรียบเทียบหรือไม่ก่อนเรียกฟังก์ชันคำนวณความแม่นยำ
-    merged_data = pd.merge(data_before[['datetime', 'wl_up']], data_filled[['datetime', 'wl_up2']], on='datetime')
-    merged_data = merged_data.dropna(subset=['wl_up', 'wl_up2'])
-    comparison_data = merged_data[merged_data['wl_up2'] != merged_data['wl_up']]
+# ฟังก์ชันสำหรับสร้างกราฟข้อมูลจากสถานีทั้งสอง (สำหรับ Linear Regression)
+def plot_data_combined_LR_stations(data, forecasted=None, upstream_data=None, downstream_data=None, label='ระดับน้ำ'):
+    fig_actual = px.line(data, x=data.index, y='wl_up', title=f'ระดับน้ำจริงที่สถานี {label}', labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
+    fig_actual.update_traces(connectgaps=False)
+    fig_actual.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
 
-    if comparison_data.empty:
-        st.header("ผลค่าความแม่นยำ")
-        st.markdown("---")
-        st.info("ไม่สามารถคำนวณความแม่นยำได้เนื่องจากไม่มีค่าจริงให้เปรียบเทียบ")
-    else:
-        calculate_accuracy_metrics(data_before, data_filled)
+    fig_forecast = px.line(forecasted, x=forecasted.index, y='wl_up', title='ระดับน้ำที่พยากรณ์', labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
+    fig_forecast.update_traces(connectgaps=False)
+    fig_forecast.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
 
-# ฟังก์ชันสำหรับสร้างกราฟข้อมูลจากสถานีทั้งสอง
-def plot_data_combined_two_stations(data, forecasted=None, upstream_data=None, downstream_data=None, label='ระดับน้ำ'):
-    fig = px.line(data, x=data.index, y='wl_up', title=f'ระดับน้ำที่สถานี {label}', labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
-    fig.update_traces(connectgaps=False)
-    
-    # แสดงค่าจริงของสถานีที่ต้องการพยากรณ์
-    fig.add_scatter(x=data.index, y=data['wl_up'], mode='lines', name='ค่าจริง (สถานีที่พยากรณ์)', line=dict(color='blue'))
-    
-    # แสดงค่าจริงของสถานี upstream (ถ้ามี)
+    # แสดงค่าจริงของสถานี Upstream (ถ้ามี)
     if upstream_data is not None:
-        fig.add_scatter(x=upstream_data.index, y=upstream_data['wl_up'], mode='lines', name='ค่าจริง (สถานี Upstream)', line=dict(color='green'))
+        fig_actual.add_scatter(x=upstream_data.index, y=upstream_data['wl_up'], mode='lines', name='ค่าจริง (สถานี Upstream)', line=dict(color='green'))
     
-    # แสดงค่าจริงของสถานี downstream (ถ้ามี)
+    # แสดงค่าจริงของสถานี Downstream (ถ้ามี)
     if downstream_data is not None:
-        fig.add_scatter(x=downstream_data.index, y=downstream_data['wl_up'], mode='lines', name='ค่าจริง (สถานี Downstream)', line=dict(color='purple'))
+        fig_actual.add_scatter(x=downstream_data.index, y=downstream_data['wl_up'], mode='lines', name='ค่าจริง (สถานี Downstream)', line=dict(color='purple'))
 
     # แสดงค่าพยากรณ์
     if forecasted is not None and not forecasted.empty:
-        fig.add_scatter(x=forecasted.index, y=forecasted['wl_up'], mode='lines', name='ค่าที่พยากรณ์', line=dict(color='red'))
+        fig_forecast.add_scatter(x=forecasted.index, y=forecasted['wl_up'], mode='lines', name='ค่าที่พยากรณ์', line=dict(color='red'))
     
-    fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
-    return fig
+    st.plotly_chart(fig_actual, use_container_width=True)
+    st.plotly_chart(fig_forecast, use_container_width=True)
 
 # ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression ทีละค่า (สถานีเดียว)
 def forecast_with_linear_regression_single(data, forecast_start_date, forecast_days):
@@ -847,15 +830,12 @@ elif model_choice == "Linear Regression":
 
                                 if not forecasted_data_lr.empty:
                                     st.header("กราฟข้อมูลพร้อมการพยากรณ์ (Linear Regression)")
-                                    st.plotly_chart(
-                                        plot_data_combined_two_stations(
-                                            target_df_lr.set_index('datetime'), 
-                                            forecasted_data_lr, 
-                                            upstream_df_lr.set_index('datetime') if upstream_df_lr is not None else None, 
-                                            downstream_df_lr.set_index('datetime') if downstream_df_lr is not None else None, 
-                                            label='สถานีที่ต้องการทำนาย'
-                                        ), 
-                                        use_container_width=True
+                                    plot_data_combined_LR_stations(
+                                        target_df_lr.set_index('datetime'), 
+                                        forecasted_data_lr, 
+                                        upstream_df_lr.set_index('datetime') if upstream_df_lr is not None else None, 
+                                        downstream_df_lr.set_index('datetime') if downstream_df_lr is not None else None, 
+                                        label='สถานีที่ต้องการทำนาย'
                                     )
                                     st.markdown("---")  # สร้างเส้นแบ่ง
 
@@ -869,9 +849,10 @@ elif model_choice == "Linear Regression":
                                         filled=filled_lr
                                     )
 
-                                    if not merged_data_lr.empty:
+                                    if mse_lr is not None:
                                         st.header("ตารางข้อมูลเปรียบเทียบ")
-                                        st.dataframe(create_comparison_table_streamlit(forecasted_data_lr, merged_data_lr), use_container_width=True)
+                                        comparison_table_lr = create_comparison_table_streamlit(forecasted_data_lr, merged_data_lr)
+                                        st.dataframe(comparison_table_lr, use_container_width=True)
                                         
                                         st.header("ผลค่าความแม่นยำ")
                                         st.markdown("---")  # สร้างเส้นแบ่ง
@@ -882,12 +863,12 @@ elif model_choice == "Linear Regression":
                                             st.metric(label="Mean Absolute Error (MAE)", value=f"{mae_lr:.4f}")
                                         with col3:
                                             st.metric(label="R-squared (R²)", value=f"{r2_lr:.4f}")
-                                    else:
-                                        st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่า MAE และ RMSE ได้")
+                                    # หากไม่มีข้อมูลจริงสำหรับการคำนวณความแม่นยำ จะมีข้อความแจ้งเตือนจากฟังก์ชัน calculate_accuracy_metrics
                                 else:
                                     st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
         else:
             st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
+
 
 
 
