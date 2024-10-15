@@ -241,7 +241,8 @@ def calculate_accuracy_metrics(original, filled):
     mae = mean_absolute_error(merged_data['wl_up'], merged_data['wl_up2'])
     r2 = r2_score(merged_data['wl_up'], merged_data['wl_up2'])
 
-    st.header("ผลค่าความแม่นยำ", divider='gray')
+    st.header("ผลค่าความแม่นยำ", )
+    st.markdown("---")  # สร้างเส้นแบ่ง
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -302,10 +303,10 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
     fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
 
     # แสดงกราฟ
-    st.header("ข้อมูลหลังจากการเติมค่าที่หายไป", divider='gray')
+    st.header("ข้อมูลหลังจากการเติมค่าที่หายไป")
     st.plotly_chart(fig, use_container_width=True)
 
-    st.header("ตารางแสดงข้อมูลหลังเติมค่า", divider='gray')
+    st.header("ตารางแสดงข้อมูลหลังเติมค่า")
     data_filled_selected = data_filled[['datetime', 'wl_up', 'wl_forecast', 'timestamp']]
     st.dataframe(data_filled_selected, use_container_width=True)
 
@@ -315,7 +316,8 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
     comparison_data = merged_data[merged_data['wl_up2'] != merged_data['wl_up']]
 
     if comparison_data.empty:
-        st.header("ผลค่าความแม่นยำ", divider='gray')
+        st.header("ผลค่าความแม่นยำ")
+        st.markdown("---")
         st.info("ไม่สามารถคำนวณความแม่นยำได้เนื่องจากไม่มีค่าจริงให้เปรียบเทียบ")
     else:
         calculate_accuracy_metrics(data_before, data_filled)
@@ -763,8 +765,9 @@ if model_choice == "Random Forest":
                     filled_data_rf = handle_missing_values_by_week(main_df_rf, start_date_rf, end_date_rf, model_type='random_forest')
 
                     # แสดงกราฟผลลัพธ์
-                    st.header("กราฟข้อมูลก่อนและหลังการเติมค่า (Random Forest)", divider='gray')
+                    st.header("กราฟข้อมูลก่อนและหลังการเติมค่า (Random Forest)")
                     st.plotly_chart(plot_results(main_df_rf, filled_data_rf, main_df_rf, delete_data_option_rf), use_container_width=True)
+                    st.markdown("---")  # สร้างเส้นแบ่ง
 
                     # เสนอให้ผู้ใช้ดาวน์โหลดข้อมูลที่เติมแล้ว
                     csv_rf = filled_data_rf.to_csv(index=False).encode('utf-8')
@@ -866,7 +869,7 @@ elif model_choice == "Linear Regression":
                                 )
 
                                 if not forecasted_data_lr.empty:
-                                    st.header("กราฟข้อมูลพร้อมการพยากรณ์ (Linear Regression)", divider='gray')
+                                    st.header("กราฟข้อมูลพร้อมการพยากรณ์ (Linear Regression)")
                                     st.plotly_chart(
                                         plot_data_combined_two_stations(
                                             target_df_lr.set_index('datetime'), 
@@ -877,6 +880,7 @@ elif model_choice == "Linear Regression":
                                         ), 
                                         use_container_width=True
                                     )
+                                    st.markdown("---")  # สร้างเส้นแบ่ง
 
                                     # เตรียมข้อมูลสำหรับการคำนวณค่าความแม่นยำ
                                     filled_lr = forecasted_data_lr.reset_index().rename(columns={'index': 'datetime'})
@@ -889,11 +893,11 @@ elif model_choice == "Linear Regression":
                                     )
 
                                     if not merged_data_lr.empty:
-                                        st.header("ตารางข้อมูลเปรียบเทียบ", divider='gray')
-                                        comparison_table_lr = create_comparison_table_streamlit(forecasted_data_lr, merged_data_lr)
-                                        st.dataframe(comparison_table_lr, use_container_width=True)
-
-                                        st.header("ผลค่าความแม่นยำ", divider='gray')
+                                        st.header("ตารางข้อมูลเปรียบเทียบ")
+                                        st.dataframe(create_comparison_table_streamlit(forecasted_data_lr, merged_data_lr), use_container_width=True)
+                                        
+                                        st.header("ผลค่าความแม่นยำ")
+                                        st.markdown("---")  # สร้างเส้นแบ่ง
                                         col1, col2, col3 = st.columns(3)
                                         with col1:
                                             st.metric(label="Mean Squared Error (MSE)", value=f"{mse_lr:.4f}")
@@ -907,6 +911,7 @@ elif model_choice == "Linear Regression":
                                     st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
         else:
             st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
+
 
 
 
