@@ -3,9 +3,9 @@ import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, PolynomialFeatures
+from sklearn.pipeline import make_pipeline
 from sklearn.model_selection import RandomizedSearchCV, train_test_split, TimeSeriesSplit
-import altair as alt
 import plotly.express as px
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import io
@@ -132,11 +132,16 @@ def train_random_forest(X_train, y_train):
 
     return random_search.best_estimator_
 
-# ฟังก์ชันสำหรับฝึกโมเดล Linear Regression
+# ฟังก์ชันสำหรับฝึกโมเดล Linear Regression ที่ปรับปรุง
 def train_linear_regression_model(X_train, y_train):
-    model = LinearRegression()
-    model.fit(X_train, y_train)
-    return model
+    poly_degree = 2  # ปรับระดับพหุนามตามต้องการ
+    pipeline = make_pipeline(
+        PolynomialFeatures(degree=poly_degree, include_bias=False),
+        StandardScaler(),
+        LinearRegression()
+    )
+    pipeline.fit(X_train, y_train)
+    return pipeline
 
 # ฟังก์ชันสำหรับสร้างวันที่ที่หายไป
 def generate_missing_dates(data):
@@ -194,10 +199,15 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
     for idx, row in data_missing.iterrows():
         X_missing = row[feature_cols].values.reshape(1, -1)
         try:
-            predicted_value = model.predict(X_missing)[0]
+            if model_type == 'linear_regression':
+                # สำหรับ Linear Regression ที่ใช้ Pipeline
+                forecast_value = model.predict([X_missing])[0]
+            else:
+                # สำหรับ Random Forest
+                forecast_value = model.predict(X_missing)[0]
             # บันทึกค่าที่เติมในคอลัมน์ wl_forecast และ timestamp
-            data_with_all_dates.loc[idx, 'wl_forecast'] = predicted_value
-            data_with_all_dates.loc[idx, 'timestamp'] = pd.Timestamp.now()
+            data_with_all_dates.at[idx, 'wl_forecast'] = forecast_value
+            data_with_all_dates.at[idx, 'timestamp'] = pd.Timestamp.now()
         except Exception as e:
             st.warning(f"ไม่สามารถพยากรณ์ค่าในแถว {idx} ได้: {e}")
             continue
@@ -362,7 +372,7 @@ def plot_data_combined_LR_stations(data, forecasted=None, upstream_data=None, do
     if fig_forecast is not None:
         st.plotly_chart(fig_forecast, use_container_width=True)
 
-# ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression ทีละค่า (Recursive Forecasting)
+# ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression ทีละค่า (Recursive Forecasting) ที่ปรับปรุงแล้ว
 def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_days, upstream_data=None, downstream_data=None, delay_hours_up=0, delay_hours_down=0):
     # ตรวจสอบจำนวนวันที่พยากรณ์ให้อยู่ในขอบเขต 1-30 วัน
     if forecast_days < 1 or forecast_days > 30:
@@ -374,7 +384,8 @@ def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_da
     # กำหนดฟีเจอร์ให้คงที่เสมอ
     feature_cols = [f'lag_{lag}' for lag in lags] + \
                    [f'lag_{lag}_upstream' for lag in lags] + \
-                   [f'lag_{lag}_downstream' for lag in lags]
+                   [f'lag_{lag}_downstream' for lag in lags] + \
+                   ['hour', 'day_of_week']
 
     # เตรียมข้อมูลจาก upstream_data ถ้ามี
     if upstream_data is not None and not upstream_data.empty:
@@ -409,13 +420,16 @@ def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_da
     training_data.fillna(method='ffill', inplace=True)
     training_data.dropna(inplace=True)
 
+    # เพิ่มฟีเจอร์เวลา
+    training_data['hour'] = training_data.index.hour
+    training_data['day_of_week'] = training_data.index.dayofweek
+
     # กำหนดฟีเจอร์และตัวแปรเป้าหมาย
     X_train = training_data[feature_cols]
     y_train = training_data['wl_up']
 
-    # เทรนโมเดล Linear Regression
-    model = LinearRegression()
-    model.fit(X_train, y_train)
+    # เทรนโมเดล Linear Regression ที่ปรับปรุง
+    model = train_linear_regression_model(X_train, y_train)
 
     # สร้าง DataFrame สำหรับการพยากรณ์
     forecast_periods = forecast_days * 96  # พยากรณ์ตามจำนวนวันที่เลือก (96 ช่วงเวลา 15 นาทีต่อวัน)
@@ -426,6 +440,14 @@ def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_da
     combined_data = data.copy()
     combined_upstream = upstream_data.copy()
     combined_downstream = downstream_data.copy()
+
+    # เพิ่มฟีเจอร์เวลาใน combined_data
+    combined_data['hour'] = combined_data.index.hour
+    combined_data['day_of_week'] = combined_data.index.dayofweek
+    combined_upstream['hour'] = combined_upstream.index.hour
+    combined_upstream['day_of_week'] = combined_upstream.index.dayofweek
+    combined_downstream['hour'] = combined_downstream.index.hour
+    combined_downstream['day_of_week'] = combined_downstream.index.dayofweek
 
     # การพยากรณ์ทีละค่า (step-by-step)
     for idx in forecasted_data.index:
@@ -448,6 +470,10 @@ def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_da
             else:
                 lag_features[f'lag_{lag}_downstream'] = y_train.mean()
 
+        # เพิ่มฟีเจอร์เวลา
+        lag_features['hour'] = idx.hour
+        lag_features['day_of_week'] = idx.dayofweek
+
         # เตรียมข้อมูลสำหรับการพยากรณ์
         X_pred = pd.DataFrame([lag_features], columns=feature_cols)
 
@@ -463,6 +489,8 @@ def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_da
 
             # อัปเดต 'combined_data' ด้วยค่าที่พยากรณ์เพื่อใช้ในการพยากรณ์ครั้งถัดไป
             combined_data.at[idx, 'wl_up'] = forecast_value
+            combined_data.at[idx, 'hour'] = idx.hour
+            combined_data.at[idx, 'day_of_week'] = idx.dayofweek
         except Exception as e:
             st.warning(f"ไม่สามารถพยากรณ์ค่าในเวลา {idx} ได้: {e}")
 
@@ -821,6 +849,8 @@ elif model_choice == "Linear Regression":
                                 st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
         else:
             st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
+
+
 
 
 
