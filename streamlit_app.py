@@ -9,7 +9,17 @@ import altair as alt
 import plotly.express as px
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
-# ฟังก์ชันจากโค้ดแรก (Random Forest)
+# ฟังก์ชันสำหรับรวมข้อมูล (ถ้าไม่มี การสร้างคอลัมน์ 'wl_up_prev' จาก 'wl_up' ของ df1)
+def merge_data(df1, df2=None):
+    if df2 is not None:
+        merged_df = pd.merge(df1, df2[['datetime', 'wl_up']], on='datetime', how='left', suffixes=('', '_prev'))
+    else:
+        # ถ้าไม่มี df2 ให้สร้างคอลัมน์ 'wl_up_prev' จาก 'wl_up' ของ df1 (shifted by 1)
+        df1['wl_up_prev'] = df1['wl_up'].shift(1)
+        merged_df = df1.copy()
+    return merged_df
+
+# ฟังก์ชันสำหรับโหลดข้อมูล
 def load_data(file):
     message_placeholder = st.empty()  # สร้างตำแหน่งที่ว่างสำหรับข้อความแจ้งเตือน
     if file is None:
@@ -35,6 +45,7 @@ def load_data(file):
     finally:
         message_placeholder.empty()  # ลบข้อความแจ้งเตือนเมื่อเสร็จสิ้นการโหลดไฟล์
 
+# ฟังก์ชันสำหรับทำความสะอาดข้อมูล
 def clean_data(df):
     data_clean = df.copy()
     data_clean['datetime'] = pd.to_datetime(data_clean['datetime'], errors='coerce')
@@ -44,6 +55,7 @@ def clean_data(df):
     
     return data_clean
 
+# ฟังก์ชันสำหรับสร้างฟีเจอร์เวลา
 def create_time_features(data_clean):
     if not pd.api.types.is_datetime64_any_dtype(data_clean['datetime']):
         data_clean['datetime'] = pd.to_datetime(data_clean['datetime'], errors='coerce')
@@ -60,6 +72,7 @@ def create_time_features(data_clean):
 
     return data_clean
 
+# ฟังก์ชันสำหรับเตรียมฟีเจอร์และตัวแปรเป้าหมาย
 def prepare_features(data_clean):
     feature_cols = [
         'year', 'month', 'day', 'hour', 'minute',
@@ -70,6 +83,7 @@ def prepare_features(data_clean):
     y = data_clean['wl_up']
     return X, y
 
+# ฟังก์ชันสำหรับฝึกและประเมินโมเดล
 def train_and_evaluate_model(X, y, model_type='random_forest'):
     # แบ่งข้อมูลเป็นชุดฝึกและชุดทดสอบ
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -89,6 +103,7 @@ def train_and_evaluate_model(X, y, model_type='random_forest'):
         return None
     return model
 
+# ฟังก์ชันสำหรับฝึกโมเดล Random Forest
 def train_random_forest(X_train, y_train):
     param_distributions = {
         'n_estimators': [100, 200, 500],
@@ -116,22 +131,26 @@ def train_random_forest(X_train, y_train):
 
     return random_search.best_estimator_
 
+# ฟังก์ชันสำหรับฝึกโมเดล Linear Regression
 def train_linear_regression_model(X_train, y_train):
     model = LinearRegression()
     model.fit(X_train, y_train)
     return model
 
+# ฟังก์ชันสำหรับสร้างวันที่ที่หายไป
 def generate_missing_dates(data):
     full_date_range = pd.date_range(start=data['datetime'].min(), end=data['datetime'].max(), freq='15T')
     all_dates = pd.DataFrame(full_date_range, columns=['datetime'])
     data_with_all_dates = pd.merge(all_dates, data, on='datetime', how='left')
     return data_with_all_dates
 
+# ฟังก์ชันสำหรับเติมคอลัมน์ 'code' ถ้ามี
 def fill_code_column(data):
     if 'code' in data.columns:
         data['code'] = data['code'].fillna(method='ffill').fillna(method='bfill')
     return data
 
+# ฟังก์ชันสำหรับจัดการค่าที่หายไปโดยใช้โมเดล
 def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='random_forest'):
     feature_cols = ['year', 'month', 'day', 'hour', 'minute',
                     'day_of_week', 'day_of_year', 'week_of_year', 'days_in_month', 'wl_up_prev']
@@ -188,6 +207,7 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
     data_with_all_dates.reset_index(drop=True, inplace=True)
     return data_with_all_dates
 
+# ฟังก์ชันสำหรับลบข้อมูลตามช่วงวันที่ที่กำหนด
 def delete_data_by_date_range(data, delete_start_date, delete_end_date):
     # Convert delete_start_date and delete_end_date to datetime
     delete_start_date = pd.to_datetime(delete_start_date)
@@ -207,6 +227,7 @@ def delete_data_by_date_range(data, delete_start_date, delete_end_date):
 
     return data
 
+# ฟังก์ชันสำหรับคำนวณค่าความแม่นยำ
 def calculate_accuracy_metrics(original, filled):
     # ผสานข้อมูลตาม datetime
     merged_data = pd.merge(original[['datetime', 'wl_up']], filled[['datetime', 'wl_up2']], on='datetime')
@@ -229,6 +250,16 @@ def calculate_accuracy_metrics(original, filled):
     with col3:
         st.metric(label="R-squared (R²)", value=f"{r2:.4f}")
 
+# ฟังก์ชันสำหรับสร้างตารางเปรียบเทียบ
+def create_comparison_table_streamlit(forecasted_data, actual_data):
+    comparison_df = pd.DataFrame({
+        'Datetime': actual_data['datetime'],
+        'ค่าจริง': actual_data['Actual'],
+        'ค่าที่พยากรณ์': actual_data['Forecasted']
+    })
+    return comparison_df
+
+# ฟังก์ชันสำหรับสร้างกราฟข้อมูลพร้อมการพยากรณ์
 def plot_results(data_before, data_filled, data_deleted, data_deleted_option=False):
     data_before_filled = pd.DataFrame({
         'วันที่': data_before['datetime'],
@@ -286,63 +317,28 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
     else:
         calculate_accuracy_metrics(data_before, data_filled)
 
-def plot_data_preview(df_pre, df2_pre, total_time_lag):
-    data_pre1 = pd.DataFrame({
-        'datetime': df_pre['datetime'],
-        'สถานีที่ต้องการทำนาย': df_pre['wl_up']
-    })
+# ฟังก์ชันสำหรับสร้างกราฟข้อมูลจากสถานีทั้งสอง
+def plot_data_combined_two_stations(data, forecasted=None, upstream_data=None, downstream_data=None, label='ระดับน้ำ'):
+    fig = px.line(data, x=data.index, y='wl_up', title=f'ระดับน้ำที่สถานี {label}', labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
+    fig.update_traces(connectgaps=False)
+    
+    # แสดงค่าจริงของสถานีที่ต้องการพยากรณ์
+    fig.add_scatter(x=data.index, y=data['wl_up'], mode='lines', name='ค่าจริง (สถานีที่พยากรณ์)', line=dict(color='blue'))
+    
+    # แสดงค่าจริงของสถานี upstream (ถ้ามี)
+    if upstream_data is not None:
+        fig.add_scatter(x=upstream_data.index, y=upstream_data['wl_up'], mode='lines', name='ค่าจริง (สถานี Upstream)', line=dict(color='green'))
+    
+    # แสดงค่าจริงของสถานี downstream (ถ้ามี)
+    if downstream_data is not None:
+        fig.add_scatter(x=downstream_data.index, y=downstream_data['wl_up'], mode='lines', name='ค่าจริง (สถานี Downstream)', line=dict(color='purple'))
 
-    if df2_pre is not None:
-        data_pre2 = pd.DataFrame({
-            'datetime': df2_pre['datetime'] + total_time_lag,  # ขยับวันที่ของสถานีก่อนหน้าตามเวลาห่างที่ระบุ
-            'สถานีก่อนหน้า': df2_pre['wl_up']
-        })
-        combined_data_pre = pd.merge(data_pre1, data_pre2, on='datetime', how='outer')
-
-        # Plot ด้วย Plotly และกำหนด color_discrete_sequence
-        fig = px.line(
-            combined_data_pre, 
-            x='datetime', 
-            y=['สถานีที่ต้องการทำนาย', 'สถานีก่อนหน้า'],
-            labels={'value': 'ระดับน้ำ (wl_up)', 'variable': 'ประเภทข้อมูล'},
-            title='ข้อมูลจากทั้งสองสถานี',
-            color_discrete_sequence=px.colors.qualitative.Plotly
-        )
-
-        fig.update_layout(
-            xaxis_title="วันที่", 
-            yaxis_title="ระดับน้ำ (wl_up)"
-        )
-
-        # แสดงกราฟ
-        st.plotly_chart(fig, use_container_width=True)
-
-    else:
-        # ถ้าไม่มีไฟล์ที่สอง ให้แสดงกราฟของไฟล์แรกเท่านั้น
-        fig = px.line(
-            data_pre1, 
-            x='datetime', 
-            y='สถานีที่ต้องการทำนาย',
-            labels={'สถานีที่ต้องการทำนาย': 'ระดับน้ำ (wl_up)'},
-            title='ข้อมูลสถานีที่ต้องการทำนาย',
-            color_discrete_sequence=px.colors.qualitative.Plotly
-        )
-
-        fig.update_layout(
-            xaxis_title="วันที่", 
-            yaxis_title="ระดับน้ำ (wl_up)"
-        )
-
-        st.plotly_chart(fig, use_container_width=True)
-
-def merge_data(df1, df2=None):
-    if df2 is not None:
-        merged_df = pd.merge(df1, df2[['datetime', 'wl_up']], on='datetime', how='left', suffixes=('', '_prev'))
-    else:
-        # ถ้าไม่มี df2 ให้สร้างคอลัมน์ 'wl_up_prev' จาก 'wl_up' ของ df1 (shifted by 1)
-        df1['wl_up_prev'] = df1['wl_up'].shift(1)
-        merged_df = df1.copy()
-    return merged_df
+    # แสดงค่าพยากรณ์
+    if forecasted is not None and not forecasted.empty:
+        fig.add_scatter(x=forecasted.index, y=forecasted['wl_up'], mode='lines', name='ค่าที่พยากรณ์', line=dict(color='red'))
+    
+    fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
+    return fig
 
 # ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression ทีละค่า (สถานีเดียว)
 def forecast_with_linear_regression_single(data, forecast_start_date, forecast_days):
@@ -573,91 +569,6 @@ def plot_data_combined_two_stations(data, forecasted=None, upstream_data=None, d
     fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
     return fig
 
-# ฟังก์ชันสำหรับคำนวณค่าความแม่นยำ
-def calculate_error_metrics(original, forecasted):
-    # เปลี่ยน index ของ forecasted เป็น 'datetime' หากยังไม่ใช่
-    if forecasted.index.name != 'datetime':
-        forecasted = forecasted.reset_index().rename(columns={'index': 'datetime'})
-
-    # รวมข้อมูลจริงและพยากรณ์
-    merged = pd.merge(original[['datetime', 'wl_up']], forecasted[['datetime', 'wl_up']], on='datetime', how='inner', suffixes=('_actual', '_forecasted'))
-
-    # ลบแถวที่มีค่า NaN
-    merged = merged.dropna(subset=['wl_up_actual', 'wl_up_forecasted'])
-
-    if merged.empty:
-        st.warning("ไม่มีข้อมูลที่ตรงกันสำหรับการคำนวณค่าความแม่นยำ")
-        return None, None, None
-
-    # คำนวณ MAE และ RMSE
-    mae = mean_absolute_error(merged['wl_up_actual'], merged['wl_up_forecasted'])
-    rmse = mean_squared_error(merged['wl_up_actual'], merged['wl_up_forecasted'], squared=False)
-
-    # คืนค่าข้อมูลจริงที่ใช้ในการเปรียบเทียบ
-    actual_forecasted_data = merged[['datetime', 'wl_up_actual', 'wl_up_forecasted']].copy()
-    actual_forecasted_data.rename(columns={'wl_up_actual': 'Actual', 'wl_up_forecasted': 'Forecasted'}, inplace=True)
-
-    return mae, rmse, actual_forecasted_data
-
-# ฟังก์ชันสำหรับแสดงตารางเปรียบเทียบ
-def create_comparison_table_streamlit(forecasted_data, actual_data):
-    comparison_df = pd.DataFrame({
-        'Datetime': actual_data['datetime'],
-        'ค่าจริง': actual_data['Actual'],
-        'ค่าที่พยากรณ์': actual_data['Forecasted']
-    })
-    return comparison_df
-
-# ฟังก์ชันสำหรับแสดงกราฟตัวอย่างข้อมูล
-def plot_data_preview(df_pre, df2_pre, total_time_lag):
-    data_pre1 = pd.DataFrame({
-        'datetime': df_pre['datetime'],
-        'สถานีที่ต้องการทำนาย': df_pre['wl_up']
-    })
-
-    if df2_pre is not None:
-        data_pre2 = pd.DataFrame({
-            'datetime': df2_pre['datetime'] + total_time_lag,  # ขยับวันที่ของสถานีก่อนหน้าตามเวลาห่างที่ระบุ
-            'สถานีก่อนหน้า': df2_pre['wl_up']
-        })
-        combined_data_pre = pd.merge(data_pre1, data_pre2, on='datetime', how='outer')
-
-        # Plot ด้วย Plotly และกำหนด color_discrete_sequence
-        fig = px.line(
-            combined_data_pre, 
-            x='datetime', 
-            y=['สถานีที่ต้องการทำนาย', 'สถานีก่อนหน้า'],
-            labels={'value': 'ระดับน้ำ (wl_up)', 'variable': 'ประเภทข้อมูล'},
-            title='ข้อมูลจากทั้งสองสถานี',
-            color_discrete_sequence=px.colors.qualitative.Plotly
-        )
-
-        fig.update_layout(
-            xaxis_title="วันที่", 
-            yaxis_title="ระดับน้ำ (wl_up)"
-        )
-
-        # แสดงกราฟ
-        st.plotly_chart(fig, use_container_width=True)
-
-    else:
-        # ถ้าไม่มีไฟล์ที่สอง ให้แสดงกราฟของไฟล์แรกเท่านั้น
-        fig = px.line(
-            data_pre1, 
-            x='datetime', 
-            y='สถานีที่ต้องการทำนาย',
-            labels={'สถานีที่ต้องการทำนาย': 'ระดับน้ำ (wl_up)'},
-            title='ข้อมูลสถานีที่ต้องการทำนาย',
-            color_discrete_sequence=px.colors.qualitative.Plotly
-        )
-
-        fig.update_layout(
-            xaxis_title="วันที่", 
-            yaxis_title="ระดับน้ำ (wl_up)"
-        )
-
-        st.plotly_chart(fig, use_container_width=True)
-
 # Streamlit UI
 st.set_page_config(
     page_title="การพยากรณ์ระดับน้ำ",
@@ -787,10 +698,6 @@ with st.sidebar:
             # อัปโหลดไฟล์หลัก
             uploaded_fill_lr = st.file_uploader("ข้อมูลสถานีที่ต้องการพยากรณ์", type="csv", key="uploader_fill_lr")
             
-            if use_nearby_lr:
-                delay_hours_up_lr = st.number_input("ระบุเวลาห่างระหว่างสถานี Upstream (ชั่วโมง)", value=0, min_value=0, key='delay_up_lr')
-                delay_hours_down_lr = st.number_input("ระบุเวลาห่างระหว่างสถานี Downstream (ชั่วโมง)", value=0, min_value=0, key='delay_down_lr')
-
         # แยกการเลือกช่วงข้อมูลสำหรับฝึกโมเดลและการพยากรณ์
         with st.sidebar.expander("เลือกช่วงข้อมูลสำหรับฝึกโมเดล", expanded=False):
             training_start_date_lr = st.date_input("วันที่เริ่มต้นฝึกโมเดล", value=pd.to_datetime("2024-05-01"), key='training_start_lr')
@@ -937,7 +844,10 @@ elif model_choice == "Linear Regression":
                         with st.spinner("กำลังพยากรณ์..."):
                             training_start_datetime_lr = pd.Timestamp.combine(training_start_date_lr, training_start_time_lr)
                             training_end_datetime_lr = pd.Timestamp.combine(training_end_date_lr, training_end_time_lr)
-                            training_data_lr = merged_training_data_lr[(merged_training_data_lr['datetime'] >= training_start_datetime_lr) & (merged_training_data_lr['datetime'] <= training_end_datetime_lr)].copy()
+                            training_data_lr = merged_training_data_lr[
+                                (merged_training_data_lr['datetime'] >= training_start_datetime_lr) & 
+                                (merged_training_data_lr['datetime'] <= training_end_datetime_lr)
+                            ].copy()
 
                             if training_data_lr.empty:
                                 st.error("ไม่มีข้อมูลในช่วงเวลาที่เลือกสำหรับการฝึกโมเดล")
@@ -961,9 +871,18 @@ elif model_choice == "Linear Regression":
 
                                 if not forecasted_data_lr.empty:
                                     st.header("กราฟข้อมูลพร้อมการพยากรณ์ (Linear Regression)", divider='gray')
-                                    st.plotly_chart(plot_data_combined_two_stations(target_df_lr.set_index('datetime'), forecasted_data_lr, upstream_data_lr.set_index('datetime') if upstream_df_lr is not None else None, downstream_data_lr.set_index('datetime') if downstream_df_lr is not None else None, label='สถานีที่ต้องการทำนาย'), use_container_width=True)
+                                    st.plotly_chart(
+                                        plot_data_combined_two_stations(
+                                            target_df_lr.set_index('datetime'), 
+                                            forecasted_data_lr, 
+                                            upstream_df_lr.set_index('datetime') if upstream_df_lr is not None else None, 
+                                            downstream_df_lr.set_index('datetime') if downstream_df_lr is not None else None, 
+                                            label='สถานีที่ต้องการทำนาย'
+                                        ), 
+                                        use_container_width=True
+                                    )
 
-                                    mae_lr, rmse_lr, actual_forecasted_data_lr = calculate_error_metrics(
+                                    mae_lr, rmse_lr, actual_forecasted_data_lr = calculate_accuracy_metrics(
                                         original=target_df_lr,
                                         forecasted=forecasted_data_lr
                                     )
@@ -985,6 +904,7 @@ elif model_choice == "Linear Regression":
                                     st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
         else:
             st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
+
 
 
 
