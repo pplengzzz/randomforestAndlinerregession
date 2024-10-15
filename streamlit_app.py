@@ -605,6 +605,64 @@ def create_comparison_table_streamlit(forecasted_data, actual_data):
     })
     return comparison_df
 
+# ฟังก์ชันสำหรับแสดงกราฟตัวอย่างข้อมูล
+def plot_data_preview(df_pre, df2_pre, total_time_lag):
+    data_pre1 = pd.DataFrame({
+        'datetime': df_pre['datetime'],
+        'สถานีที่ต้องการทำนาย': df_pre['wl_up']
+    })
+
+    if df2_pre is not None:
+        data_pre2 = pd.DataFrame({
+            'datetime': df2_pre['datetime'] + total_time_lag,  # ขยับวันที่ของสถานีก่อนหน้าตามเวลาห่างที่ระบุ
+            'สถานีก่อนหน้า': df2_pre['wl_up']
+        })
+        combined_data_pre = pd.merge(data_pre1, data_pre2, on='datetime', how='outer')
+
+        # Plot ด้วย Plotly และกำหนด color_discrete_sequence
+        fig = px.line(
+            combined_data_pre, 
+            x='datetime', 
+            y=['สถานีที่ต้องการทำนาย', 'สถานีก่อนหน้า'],
+            labels={'value': 'ระดับน้ำ (wl_up)', 'variable': 'ประเภทข้อมูล'},
+            title='ข้อมูลจากทั้งสองสถานี',
+            color_discrete_sequence=px.colors.qualitative.Plotly
+        )
+
+        fig.update_layout(
+            xaxis_title="วันที่", 
+            yaxis_title="ระดับน้ำ (wl_up)"
+        )
+
+        # แสดงกราฟ
+        st.plotly_chart(fig, use_container_width=True)
+
+    else:
+        # ถ้าไม่มีไฟล์ที่สอง ให้แสดงกราฟของไฟล์แรกเท่านั้น
+        fig = px.line(
+            data_pre1, 
+            x='datetime', 
+            y='สถานีที่ต้องการทำนาย',
+            labels={'สถานีที่ต้องการทำนาย': 'ระดับน้ำ (wl_up)'},
+            title='ข้อมูลสถานีที่ต้องการทำนาย',
+            color_discrete_sequence=px.colors.qualitative.Plotly
+        )
+
+        fig.update_layout(
+            xaxis_title="วันที่", 
+            yaxis_title="ระดับน้ำ (wl_up)"
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+def merge_data(df1, df2=None):
+    if df2 is not None:
+        merged_df = pd.merge(df1, df2[['datetime', 'wl_up']], on='datetime', how='left', suffixes=('', '_prev'))
+    else:
+        # ถ้าไม่มี df2 ให้สร้างคอลัมน์ 'wl_up_prev' จาก 'wl_up' ของ df1 (shifted by 1)
+        df1['wl_up_prev'] = df1['wl_up'].shift(1)
+        merged_df = df1.copy()
+    return merged_df
 
 # Streamlit UI
 st.set_page_config(
@@ -829,6 +887,7 @@ if model_choice == "Linear Regression":
                                 st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
     else:
         st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วย Linear Regression")
+
 
 
 
