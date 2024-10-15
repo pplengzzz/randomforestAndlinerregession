@@ -413,13 +413,9 @@ def forecast_with_linear_regression_single(data, forecast_start_date, forecast_d
     X_train = training_data[feature_cols]
     y_train = training_data['wl_up']
 
-    # สเกลข้อมูล
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-
     # เทรนโมเดล Linear Regression
     model = LinearRegression()
-    model.fit(X_train_scaled, y_train)
+    model.fit(X_train, y_train)
 
     # สร้าง DataFrame สำหรับการพยากรณ์
     forecast_periods = forecast_days * 96  # พยากรณ์ตามจำนวนวันที่เลือก (96 ช่วงเวลา 15 นาทีต่อวัน)
@@ -443,10 +439,9 @@ def forecast_with_linear_regression_single(data, forecast_start_date, forecast_d
 
         # เตรียมข้อมูลสำหรับการพยากรณ์
         X_pred = pd.DataFrame([lag_features])
-        X_pred_scaled = scaler.transform(X_pred)
 
         # พยากรณ์ค่า
-        forecast_value = model.predict(X_pred_scaled)[0]
+        forecast_value = model.predict(X_pred)[0]
 
         # ป้องกันการกระโดดของค่าพยากรณ์
         forecast_value = np.clip(forecast_value, combined_data['wl_up'].min(), combined_data['wl_up'].max())
@@ -512,13 +507,9 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
     X_train = training_data[feature_cols]
     y_train = training_data['wl_up']
 
-    # สเกลข้อมูล
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-
     # เทรนโมเดล Linear Regression
     model = LinearRegression()
-    model.fit(X_train_scaled, y_train)
+    model.fit(X_train, y_train)
 
     # สร้าง DataFrame สำหรับการพยากรณ์
     forecast_periods = forecast_days * 96  # พยากรณ์ตามจำนวนวันที่เลือก (96 ช่วงเวลา 15 นาทีต่อวัน)
@@ -552,10 +543,9 @@ def forecast_with_linear_regression_two(data, upstream_data, forecast_start_date
 
         # เตรียมข้อมูลสำหรับการพยากรณ์
         X_pred = pd.DataFrame([lag_features])
-        X_pred_scaled = scaler.transform(X_pred)
 
         # พยากรณ์ค่า
-        forecast_value = model.predict(X_pred_scaled)[0]
+        forecast_value = model.predict(X_pred)[0]
 
         # ป้องกันการกระโดดของค่าพยากรณ์
         forecast_value = np.clip(forecast_value, combined_data['wl_up'].min(), combined_data['wl_up'].max())
