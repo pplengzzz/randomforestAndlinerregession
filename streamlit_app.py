@@ -218,7 +218,7 @@ def train_linear_regression_model(X_train, y_train):
     model.fit(X_train, y_train)
     return model
 
-def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_days, upstream_data=None, downstream_data=None, delay_hours_up=0, delay_hours_down=0):
+def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_days, upstream_data=None, downstream_data=None, delay_hours_up=0, delay_hours_down=0, model=None):
     """
     Forecast future values using Linear Regression with multiple stations.
     """
@@ -269,13 +269,10 @@ def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_da
     X_train = training_data[feature_cols]
     y_train = training_data['wl_up_target']
 
-    # Train Linear Regression model
-    pipeline = make_pipeline(
-        PolynomialFeatures(degree=1, include_bias=False),
-        StandardScaler(),
-        LinearRegression()
-    )
-    pipeline.fit(X_train, y_train)
+    # Ensure model is provided
+    if model is None:
+        st.error("โมเดลไม่ถูกส่งเข้ามา กรุณาเรียกใช้โมเดลที่ฝึกแล้ว")
+        return pd.DataFrame()
 
     # Forecast periods
     forecast_periods = forecast_days * 96  # 96 periods per day (15 min)
@@ -283,7 +280,7 @@ def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_da
     forecasted_data = pd.DataFrame(index=forecast_index, columns=['wl_up'])
 
     # Prepare combined data for forecasting
-    combined_data = data.copy()
+    combined_data = training_data.set_index('datetime').copy()
     if upstream_data is not None:
         combined_upstream = upstream_data.set_index('datetime')['wl_up']
     else:
@@ -317,19 +314,20 @@ def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_da
         X_pred = pd.DataFrame([lag_features], columns=feature_cols)
 
         try:
-            forecast_value = pipeline.predict(X_pred)[0]
+            forecast_value = model.predict(X_pred)[0]
             # Clip forecast_value to be within min and max of historical data
-            forecast_value = np.clip(forecast_value, data['wl_up_target'].min(), data['wl_up_target'].max())
+            forecast_value = np.clip(forecast_value, training_data['wl_up_target'].min(), training_data['wl_up_target'].max())
             forecasted_data.at[idx, 'wl_up'] = forecast_value
 
             # Update combined_data for next iteration
-            combined_data = combined_data.append({'datetime': idx, 'wl_up_target': forecast_value}, ignore_index=True)
+            new_row = pd.DataFrame({'wl_up_target': forecast_value}, index=[idx])
+            combined_data = pd.concat([combined_data, new_row])
         except Exception as e:
             st.warning(f"ไม่สามารถพยากรณ์ค่าในเวลา {idx} ได้: {e}")
 
     return forecasted_data
 
-def forecast_with_linear_regression_single(data, forecast_start_date, forecast_days, lags=[1,2,4,8]):
+def forecast_with_linear_regression_single(data, forecast_start_date, forecast_days, lags=[1,2,4,8], model=None):
     """
     Forecast future values using Linear Regression for single station.
     """
@@ -361,17 +359,18 @@ def forecast_with_linear_regression_single(data, forecast_start_date, forecast_d
     X_train = training_data[feature_cols]
     y_train = training_data['wl_up']
 
-    # Train Linear Regression
-    model = LinearRegression()
-    model.fit(X_train, y_train)
+    # Ensure model is provided
+    if model is None:
+        st.error("โมเดลไม่ถูกส่งเข้ามา กรุณาเรียกใช้โมเดลที่ฝึกแล้ว")
+        return pd.DataFrame()
 
     # Forecast periods
     forecast_periods = forecast_days * 96  # 96 periods per day (15 min)
     forecast_index = pd.date_range(start=forecast_start_date, periods=forecast_periods, freq='15T')
     forecasted_data = pd.DataFrame(index=forecast_index, columns=['wl_up'])
 
-    # Prepare combined data
-    combined_data = data.copy()
+    # Prepare combined data for forecasting
+    combined_data = training_data.copy()
 
     # Forecast loop
     for idx in forecasted_data.index:
@@ -389,7 +388,7 @@ def forecast_with_linear_regression_single(data, forecast_start_date, forecast_d
         try:
             forecast_value = model.predict(X_pred)[0]
             # Clip forecast_value
-            forecast_value = np.clip(forecast_value, data['wl_up'].min(), data['wl_up'].max())
+            forecast_value = np.clip(forecast_value, training_data['wl_up'].min(), training_data['wl_up'].max())
             forecasted_data.at[idx, 'wl_up'] = forecast_value
 
             # Update combined_data for next iteration
@@ -747,7 +746,7 @@ st.set_page_config(
 
 st.markdown("""
 # การพยากรณ์ระดับน้ำ
-    
+
 แอป Streamlit สำหรับจัดการข้อมูลระดับน้ำ โดยใช้โมเดล **Random Forest** หรือ **Linear Regression** เพื่อเติมค่าที่ขาดหายไปและพยากรณ์ข้อมูล
 ข้อมูลถูกประมวลผลและแสดงผลผ่านกราฟและการวัดค่าความแม่นยำ ผู้ใช้สามารถเลือกอัปโหลดไฟล์, 
 กำหนดช่วงเวลาลบข้อมูล และเลือกวิธีการพยากรณ์ได้
@@ -953,14 +952,14 @@ if model_choice == "Random Forest":
 
                     # Fill missing 'wl_up_prev'
                     if 'wl_up_prev' not in df_clean_final.columns:
-                        df_clean_final['wl_up_prev'] = df_clean_final['wl_up_target'].shift(1)
+                        df_clean_final['wl_up_prev'] = df_clean_final['wl_up'].shift(1)
                     df_clean_final['wl_up_prev'] = df_clean_final['wl_up_prev'].interpolate(method='linear')
 
                     # Handle missing values
                     df_handled = handle_missing_values_by_week(df_clean_final, model_type='random_forest')
 
                     # Prepare features and target
-                    lags_rf = [1,2,4,8]  # Assuming similar lags for Random Forest
+                    lags_rf = [1, 2, 4, 8]  # 15 min, 30 min, 1 hr, 2 hr
                     X_rf, y_rf = prepare_features(df_handled, lags=lags_rf, window=672)  # window can be adjusted as needed
 
                     # Train Random Forest model
@@ -997,6 +996,9 @@ if model_choice == "Random Forest":
 
                     # Plot filled data
                     plot_results(df_before_deletion, df_handled, df_deleted, data_deleted_option=delete_data_option)
+
+                    # Remove processing message
+                    processing_placeholder.empty()
 
     else:
         st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วย Random Forest")
@@ -1122,19 +1124,20 @@ elif model_choice == "Linear Regression":
                                 st.header("การพยากรณ์ในอนาคต", divider='gray')
                                 forecast_start_date_actual_lr = training_end_datetime_lr + pd.Timedelta(minutes=15)
                                 forecasted_data_lr = forecast_with_linear_regression_multi(
-                                    data=target_df_lr.set_index('datetime'),
+                                    data=training_data_lr.set_index('datetime'),
                                     forecast_start_date=forecast_start_date_actual_lr,
                                     forecast_days=forecast_days_lr,
                                     upstream_data=upstream_df_lr.set_index('datetime') if use_nearby_lr and use_upstream_lr else None,
                                     downstream_data=downstream_df_lr.set_index('datetime') if use_nearby_lr and use_downstream_lr else None,
                                     delay_hours_up=st.session_state.get('delay_hours_up_lr', 0),
-                                    delay_hours_down=st.session_state.get('delay_hours_down_lr', 0)
+                                    delay_hours_down=st.session_state.get('delay_hours_down_lr', 0),
+                                    model=results['model']
                                 )
 
                                 if not forecasted_data_lr.empty:
                                     st.header("กราฟข้อมูลพร้อมการพยากรณ์ (Linear Regression)")
                                     plot_data_combined_LR_stations(
-                                        target_df_lr.set_index('datetime'), 
+                                        training_data_lr.set_index('datetime'), 
                                         forecasted_data_lr, 
                                         upstream_df_lr.set_index('datetime') if use_nearby_lr and use_upstream_lr else None, 
                                         downstream_df_lr.set_index('datetime') if use_nearby_lr and use_downstream_lr else None, 
@@ -1148,7 +1151,7 @@ elif model_choice == "Linear Regression":
                                     filled_lr.drop(columns=['wl_up'], inplace=True)
 
                                     mse_lr, mae_lr, r2_lr, merged_data_lr = calculate_accuracy_metrics_linear(
-                                        original=target_df_lr.reset_index(),
+                                        original=training_data_lr.reset_index(),
                                         filled=filled_lr
                                     )
 
@@ -1166,11 +1169,10 @@ elif model_choice == "Linear Regression":
                                             st.metric(label="Mean Absolute Error (MAE)", value=f"{mae_lr:.4f}")
                                         with col3:
                                             st.metric(label="R-squared (R²)", value=f"{r2_lr:.4f}")
-                                else:
-                                    st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
                             st.markdown("---")  # Divider
         else:
             st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
+
 
 
 
