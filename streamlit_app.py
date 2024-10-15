@@ -8,6 +8,7 @@ from sklearn.model_selection import RandomizedSearchCV, train_test_split, TimeSe
 import altair as alt
 import plotly.express as px
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+import io
 
 # ฟังก์ชันสำหรับรวมข้อมูล (ถ้าไม่มี การสร้างคอลัมน์ 'wl_up_prev' จาก 'wl_up' ของ df1)
 def merge_data(df1, df2=None):
@@ -250,12 +251,14 @@ def calculate_accuracy_metrics(original, filled):
     with col3:
         st.metric(label="R-squared (R²)", value=f"{r2:.4f}")
 
+    return mse, mae, r2, merged_data
+
 # ฟังก์ชันสำหรับสร้างตารางเปรียบเทียบ
 def create_comparison_table_streamlit(forecasted_data, actual_data):
     comparison_df = pd.DataFrame({
         'Datetime': actual_data['datetime'],
-        'ค่าจริง': actual_data['Actual'],
-        'ค่าที่พยากรณ์': actual_data['Forecasted']
+        'ค่าจริง': actual_data['wl_up'],
+        'ค่าที่พยากรณ์': actual_data['wl_up2']
     })
     return comparison_df
 
@@ -303,7 +306,7 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
     st.plotly_chart(fig, use_container_width=True)
 
     st.header("ตารางแสดงข้อมูลหลังเติมค่า", divider='gray')
-    data_filled_selected = data_filled[['code', 'datetime', 'wl_up', 'wl_forecast', 'timestamp']]
+    data_filled_selected = data_filled[['datetime', 'wl_up', 'wl_forecast', 'timestamp']]
     st.dataframe(data_filled_selected, use_container_width=True)
 
     # ตรวจสอบว่ามีค่าจริงให้เปรียบเทียบหรือไม่ก่อนเรียกฟังก์ชันคำนวณความแม่นยำ
@@ -546,29 +549,6 @@ def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_da
 
     return forecasted_data
 
-# ฟังก์ชันสำหรับสร้างกราฟข้อมูลพร้อมการพยากรณ์
-def plot_data_combined_two_stations(data, forecasted=None, upstream_data=None, downstream_data=None, label='ระดับน้ำ'):
-    fig = px.line(data, x=data.index, y='wl_up', title=f'ระดับน้ำที่สถานี {label}', labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
-    fig.update_traces(connectgaps=False)
-    
-    # แสดงค่าจริงของสถานีที่ต้องการพยากรณ์
-    fig.add_scatter(x=data.index, y=data['wl_up'], mode='lines', name='ค่าจริง (สถานีที่พยากรณ์)', line=dict(color='blue'))
-    
-    # แสดงค่าจริงของสถานี upstream (ถ้ามี)
-    if upstream_data is not None:
-        fig.add_scatter(x=upstream_data.index, y=upstream_data['wl_up'], mode='lines', name='ค่าจริง (สถานี Upstream)', line=dict(color='green'))
-    
-    # แสดงค่าจริงของสถานี downstream (ถ้ามี)
-    if downstream_data is not None:
-        fig.add_scatter(x=downstream_data.index, y=downstream_data['wl_up'], mode='lines', name='ค่าจริง (สถานี Downstream)', line=dict(color='purple'))
-
-    # แสดงค่าพยากรณ์
-    if forecasted is not None and not forecasted.empty:
-        fig.add_scatter(x=forecasted.index, y=forecasted['wl_up'], mode='lines', name='ค่าที่พยากรณ์', line=dict(color='red'))
-    
-    fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
-    return fig
-
 # Streamlit UI
 st.set_page_config(
     page_title="การพยากรณ์ระดับน้ำ",
@@ -618,15 +598,21 @@ with st.sidebar:
                 uploaded_down_rf = None
 
             # เพิ่มช่องกรอกเวลาห่างระหว่างสถานี
+            # กำหนดค่าเริ่มต้นสำหรับ delay_hours_up_rf และ delay_hours_down_rf
+            delay_hours_up_rf = 0
+            delay_hours_down_rf = 0
+
             if use_nearby_rf:
                 if use_upstream_rf:
                     delay_days_up_rf = st.number_input("ระบุเวลาห่างระหว่างสถานี Upstream (วัน)", value=0, min_value=0)
+                    delay_hours_up_rf = delay_days_up_rf * 24  # แปลงวันเป็นชั่วโมง
                     total_time_lag_up_rf = pd.Timedelta(days=delay_days_up_rf)
                 else:
                     total_time_lag_up_rf = pd.Timedelta(days=0)
 
                 if use_downstream_rf:
                     delay_days_down_rf = st.number_input("ระบุเวลาห่างระหว่างสถานี Downstream (วัน)", value=0, min_value=0)
+                    delay_hours_down_rf = delay_days_down_rf * 24  # แปลงวันเป็นชั่วโมง
                     total_time_lag_down_rf = pd.Timedelta(days=delay_days_down_rf)
                 else:
                     total_time_lag_down_rf = pd.Timedelta(days=0)
@@ -679,6 +665,10 @@ with st.sidebar:
                 uploaded_down_lr = None
 
             # เพิ่มช่องกรอกเวลาห่างระหว่างสถานี
+            # กำหนดค่าเริ่มต้นสำหรับ delay_hours_up_lr และ delay_hours_down_lr
+            delay_hours_up_lr = 0
+            delay_hours_down_lr = 0
+
             if use_nearby_lr:
                 if use_upstream_lr:
                     delay_hours_up_lr = st.number_input("ระบุเวลาห่างระหว่างสถานี Upstream (ชั่วโมง)", value=0, min_value=0)
@@ -776,9 +766,14 @@ if model_choice == "Random Forest":
                     st.header("กราฟข้อมูลก่อนและหลังการเติมค่า (Random Forest)", divider='gray')
                     st.plotly_chart(plot_results(main_df_rf, filled_data_rf, main_df_rf, delete_data_option_rf), use_container_width=True)
 
-                    # บันทึกข้อมูลที่เติมแล้ว
-                    filled_data_rf.to_csv('/content/drive/MyDrive/กรมชล/ลุ่มแม่น้ำวัง/tc.1fill/randomforest.csv', index=False)
-                    st.success("บันทึกข้อมูลที่เติมเรียบร้อยแล้วที่ '/content/drive/MyDrive/กรมชล/ลุ่มแม่น้ำวัง/tc.1fill/randomforest.csv'")
+                    # เสนอให้ผู้ใช้ดาวน์โหลดข้อมูลที่เติมแล้ว
+                    csv_rf = filled_data_rf.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label="ดาวน์โหลดข้อมูลที่เติมแล้ว (Random Forest)",
+                        data=csv_rf,
+                        file_name='randomforest_filled_data.csv',
+                        mime='text/csv',
+                    )
         else:
             st.error("กรุณาอัปโหลดไฟล์หลักสำหรับ Random Forest")
 
@@ -866,7 +861,7 @@ elif model_choice == "Linear Regression":
                                     forecast_start_date=forecast_start_date_actual_lr,
                                     forecast_days=forecast_days_lr,
                                     delay_hours_up=delay_hours_up_lr,
-                                    delay_hours_down=delay_hours_down_lr
+                                    delay_hours_down=delay_hours_down_lr  # ตัวแปรที่แก้ไขแล้ว
                                 )
 
                                 if not forecasted_data_lr.empty:
@@ -882,28 +877,31 @@ elif model_choice == "Linear Regression":
                                         use_container_width=True
                                     )
 
-                                    mae_lr, rmse_lr, actual_forecasted_data_lr = calculate_accuracy_metrics(
+                                    mse_lr, mae_lr, r2_lr, merged_data_lr = calculate_accuracy_metrics(
                                         original=target_df_lr,
-                                        forecasted=forecasted_data_lr
+                                        filled=forecasted_data_lr.reset_index().rename(columns={'index': 'datetime'})
                                     )
 
-                                    if actual_forecasted_data_lr is not None:
+                                    if not merged_data_lr.empty:
                                         st.header("ตารางข้อมูลเปรียบเทียบ", divider='gray')
-                                        comparison_table_lr = create_comparison_table_streamlit(forecasted_data_lr, actual_forecasted_data_lr)
+                                        comparison_table_lr = create_comparison_table_streamlit(forecasted_data_lr, merged_data_lr)
                                         st.dataframe(comparison_table_lr, use_container_width=True)
 
                                         st.header("ผลค่าความแม่นยำ", divider='gray')
-                                        col1, col2 = st.columns(2)
+                                        col1, col2, col3 = st.columns(3)
                                         with col1:
-                                            st.metric(label="Mean Absolute Error (MAE)", value=f"{mae_lr:.2f}")
+                                            st.metric(label="Mean Squared Error (MSE)", value=f"{mse_lr:.4f}")
                                         with col2:
-                                            st.metric(label="Root Mean Squared Error (RMSE)", value=f"{rmse_lr:.2f}")
+                                            st.metric(label="Mean Absolute Error (MAE)", value=f"{mae_lr:.4f}")
+                                        with col3:
+                                            st.metric(label="R-squared (R²)", value=f"{r2_lr:.4f}")
                                     else:
                                         st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่า MAE และ RMSE ได้")
                                 else:
                                     st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
         else:
             st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
+
 
 
 
