@@ -829,6 +829,7 @@ elif model_choice == "Linear Regression":
                     else:
                         downstream_df_lr = None
 
+                    # รวมข้อมูลจาก upstream และ downstream ถ้ามี
                     if use_nearby_lr and (use_upstream_lr or use_downstream_lr):
                         merged_training_data_lr = merge_data(target_df_lr, upstream_df_lr if use_upstream_lr else None)
                         merged_training_data_lr = merge_data(merged_training_data_lr, downstream_df_lr if use_downstream_lr else None)
@@ -860,8 +861,8 @@ elif model_choice == "Linear Regression":
                                     downstream_data=downstream_df_lr.set_index('datetime') if downstream_df_lr is not None else None,
                                     forecast_start_date=forecast_start_date_actual_lr,
                                     forecast_days=forecast_days_lr,
-                                    delay_hours_up=delay_hours_up_lr,
-                                    delay_hours_down=delay_hours_down_lr  # ตัวแปรที่แก้ไขแล้ว
+                                    delay_hours_up=delay_hours_up_lr if use_nearby_lr and use_upstream_lr else 0,
+                                    delay_hours_down=delay_hours_down_lr if use_nearby_lr and use_downstream_lr else 0
                                 )
 
                                 if not forecasted_data_lr.empty:
@@ -877,9 +878,14 @@ elif model_choice == "Linear Regression":
                                         use_container_width=True
                                     )
 
+                                    # เตรียมข้อมูลสำหรับการคำนวณค่าความแม่นยำ
+                                    filled_lr = forecasted_data_lr.reset_index().rename(columns={'index': 'datetime'})
+                                    filled_lr['wl_up2'] = filled_lr['wl_up']
+                                    filled_lr.drop(columns=['wl_up'], inplace=True)
+
                                     mse_lr, mae_lr, r2_lr, merged_data_lr = calculate_accuracy_metrics(
                                         original=target_df_lr,
-                                        filled=forecasted_data_lr.reset_index().rename(columns={'index': 'datetime'})
+                                        filled=filled_lr
                                     )
 
                                     if not merged_data_lr.empty:
@@ -901,6 +907,7 @@ elif model_choice == "Linear Regression":
                                     st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
         else:
             st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
+
 
 
 
