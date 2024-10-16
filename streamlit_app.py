@@ -362,10 +362,16 @@ def plot_results(data_before, data_filled, data_deleted, model_type='random_fore
     })
 
     # สร้าง DataFrame สำหรับข้อมูลหลังเติมค่า
-    data_after_filled = pd.DataFrame({
-        'วันที่': data_filled['datetime'],
-        'ข้อมูลหลังเติมค่า': data_filled['wl_up2']
-    })
+    if model_type == 'random_forest':
+        data_after_filled = pd.DataFrame({
+            'วันที่': data_filled['datetime'],
+            'ข้อมูลหลังเติมค่า': data_filled['wl_up2']
+        })
+    elif model_type == 'linear_regression':
+        data_after_filled = pd.DataFrame({
+            'วันที่': data_filled['datetime'],
+            'ค่าที่พยากรณ์': data_filled['wl_up_pred']
+        })
 
     # สร้าง DataFrame สำหรับข้อมูลหลังลบ (ถ้ามี)
     if data_deleted_option:
@@ -383,7 +389,11 @@ def plot_results(data_before, data_filled, data_deleted, model_type='random_fore
         combined_data = pd.merge(combined_data, data_after_deleted, on='วันที่', how='outer')
 
     # กำหนดรายการ y ที่จะแสดงในกราฟ
-    y_columns = ['ข้อมูลหลังเติมค่า', 'ข้อมูลเดิม']
+    if model_type == 'random_forest':
+        y_columns = ['ข้อมูลหลังเติมค่า', 'ข้อมูลเดิม']
+    elif model_type == 'linear_regression':
+        y_columns = ['ค่าที่พยากรณ์', 'ข้อมูลเดิม']
+
     if data_after_deleted is not None:
         y_columns.append('ข้อมูลหลังลบ')
 
@@ -395,26 +405,38 @@ def plot_results(data_before, data_filled, data_deleted, model_type='random_fore
     fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
 
     # แสดงกราฟ
-    st.header("ข้อมูลหลังจากการเติมค่าที่หายไป", divider='gray')
+    st.header("ผลการพยากรณ์", divider='gray')
     st.plotly_chart(fig, use_container_width=True)
 
     # แสดงตารางข้อมูลหลังเติมค่า
     st.header("ตารางแสดงข้อมูลหลังเติมค่า", divider='gray')
-    data_filled_selected = data_filled[['datetime', 'wl_up', 'wl_forecast', 'timestamp']].copy()
-    if 'code' in data_filled.columns:
-        data_filled_selected['code'] = data_filled['code']
-    st.dataframe(data_filled_selected, use_container_width=True)
+    if model_type == 'random_forest':
+        data_filled_selected = data_filled[['datetime', 'wl_up', 'wl_forecast', 'timestamp']].copy()
+        if 'code' in data_filled.columns:
+            data_filled_selected['code'] = data_filled['code']
+        st.dataframe(data_filled_selected, use_container_width=True)
+    elif model_type == 'linear_regression':
+        data_filled_selected = data_filled[['datetime', 'wl_up', 'wl_up_pred']].copy()
+        st.dataframe(data_filled_selected, use_container_width=True)
 
     # ตรวจสอบว่ามีค่าจริงให้เปรียบเทียบหรือไม่ก่อนเรียกฟังก์ชันคำนวณความแม่นยำ
-    merged_data = pd.merge(data_before[['datetime', 'wl_up']], data_filled[['datetime', 'wl_up2']], on='datetime')
-    merged_data = merged_data.dropna(subset=['wl_up', 'wl_up2'])
-    comparison_data = merged_data[merged_data['wl_up2'] != merged_data['wl_up']]
-
-    if data_deleted_option:
-        calculate_accuracy_metrics(data_before, data_filled, data_deleted)
-    else:
-        st.header("ผลค่าความแม่นยำ", divider='gray')
-        st.info("ไม่สามารถคำนวณความแม่นยำได้เนื่องจากไม่มีการลบข้อมูล")
+    if model_type == 'random_forest':
+        if data_deleted_option:
+            calculate_accuracy_metrics(data_before, data_filled, data_deleted)
+        else:
+            st.header("ผลค่าความแม่นยำ", divider='gray')
+            st.info("ไม่สามารถคำนวณความแม่นยำได้เนื่องจากไม่มีการลบข้อมูล")
+    elif model_type == 'linear_regression':
+        mse, mae, r2, merged_data = calculate_accuracy_metrics_linear(data_before, data_filled)
+        if mse is not None:
+            st.header("ผลค่าความแม่นยำ", divider='gray')
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric(label="Mean Squared Error (MSE)", value=f"{mse:.4f}")
+            with col2:
+                st.metric(label="Mean Absolute Error (MAE)", value=f"{mae:.4f}")
+            with col3:
+                st.metric(label="R-squared (R²)", value=f"{r2:.4f}")
 
 # ฟังก์ชันสำหรับแสดงกราฟตัวอย่างข้อมูลที่อัปโหลด
 def plot_data_preview(df_pre, df_up_pre=None, df_down_pre=None, total_time_lag_upstream=pd.Timedelta(hours=0), total_time_lag_downstream=pd.Timedelta(hours=0)):
@@ -622,7 +644,12 @@ def train_and_forecast_LR(target_data, upstream_data=None, downstream_data=None,
         current_data = pd.concat([current_data, new_row_df], ignore_index=True)
 
     future_df = pd.DataFrame(future_predictions)
-    return future_df
+
+    # รวมข้อมูลจริงและข้อมูลพยากรณ์เข้าด้วยกัน
+    combined_data = pd.concat([target_data[['datetime', 'wl_up']], future_df], ignore_index=True)
+    combined_data = combined_data.sort_values('datetime').reset_index(drop=True)
+
+    return combined_data
 
 # ฟังก์ชันสำหรับคำนวณค่าความแม่นยำของ Linear Regression
 def calculate_accuracy_metrics_linear(original, forecasted):
@@ -642,15 +669,6 @@ def calculate_accuracy_metrics_linear(original, forecasted):
     r2 = r2_score(merged_data['wl_up'], merged_data['wl_up_pred'])
 
     return mse, mae, r2, merged_data
-
-# ฟังก์ชันสำหรับสร้างตารางเปรียบเทียบ
-def create_comparison_table_streamlit(forecasted_data, merged_data):
-    comparison_df = pd.DataFrame({
-        'Datetime': merged_data['datetime'],
-        'ค่าจริง': merged_data['wl_up'],
-        'ค่าที่พยากรณ์': merged_data['wl_up_pred']
-    })
-    return comparison_df
 
 # ส่วนของ Streamlit UI
 st.set_page_config(
@@ -971,7 +989,7 @@ elif model_choice == "Linear Regression":
                         plot_data_preview(target_df_lr, upstream_df_lr, downstream_df_lr, 
                                           pd.Timedelta(hours=time_lag_upstream_lr), pd.Timedelta(hours=time_lag_downstream_lr))
 
-                        forecasted_data_lr = train_and_forecast_LR(
+                        combined_data_lr = train_and_forecast_LR(
                             target_data=target_df_lr,
                             upstream_data=upstream_df_lr,
                             downstream_data=downstream_df_lr,
@@ -982,55 +1000,26 @@ elif model_choice == "Linear Regression":
                             travel_time_down=time_lag_downstream_lr
                         )
 
-                        if forecasted_data_lr is not None and not forecasted_data_lr.empty:
-                            st.header("กราฟข้อมูลพร้อมการพยากรณ์ (Linear Regression)")
-                            # แสดงกราฟผลการพยากรณ์พร้อมค่าจริงถ้ามี
-                            fig = px.line(
-                                forecasted_data_lr, 
-                                x='datetime', 
-                                y='wl_up_pred', 
-                                labels={'datetime': 'วันที่', 'wl_up_pred': 'ระดับน้ำ (wl_up_pred)'},
-                                title='ผลการพยากรณ์ระดับน้ำ',
-                                color_discrete_sequence=['blue']
-                            )
-                            # ถ้ามีค่าจริงในช่วงเวลานั้น
-                            merged_forecast_actual = pd.merge(forecasted_data_lr, target_df_lr[['datetime', 'wl_up']], on='datetime', how='left')
-                            if not merged_forecast_actual['wl_up'].isnull().all():
-                                fig.add_scatter(
-                                    x=merged_forecast_actual['datetime'],
-                                    y=merged_forecast_actual['wl_up'],
-                                    mode='lines',
-                                    name='ค่าจริง',
-                                    line=dict(color='red')
-                                )
-                            st.plotly_chart(fig, use_container_width=True)
+                        if combined_data_lr is not None and not combined_data_lr.empty:
+                            # เก็บข้อมูลก่อนการพยากรณ์สำหรับการเปรียบเทียบ
+                            data_before_lr = target_df_lr.copy()
+                            data_handled_lr = combined_data_lr.copy()
 
-                            # คำนวณค่าความแม่นยำ
-                            mse_lr, mae_lr, r2_lr, merged_data_lr = calculate_accuracy_metrics_linear(
-                                original=target_df_lr,
-                                forecasted=forecasted_data_lr
+                            # Plot the results using the same function
+                            display_model_results(
+                                model_type='linear_regression',
+                                data_before=data_before_lr,
+                                data_handled=data_handled_lr,
+                                data_deleted=None,
+                                delete_data_option=False
                             )
-
-                            if mse_lr is not None:
-                                st.header("ตารางข้อมูลเปรียบเทียบ")
-                                comparison_table_lr = create_comparison_table_streamlit(forecasted_data_lr, merged_data_lr)
-                                st.dataframe(comparison_table_lr, use_container_width=True)
-                                
-                                st.header("ผลค่าความแม่นยำ")
-                                st.markdown("---")
-                                col1, col2, col3 = st.columns(3)
-                                with col1:
-                                    st.metric(label="Mean Squared Error (MSE)", value=f"{mse_lr:.4f}")
-                                with col2:
-                                    st.metric(label="Mean Absolute Error (MAE)", value=f"{mae_lr:.4f}")
-                                with col3:
-                                    st.metric(label="R-squared (R²)", value=f"{r2_lr:.4f}")
                         else:
                             st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
             else:
                 st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
     else:
         st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วย Linear Regression")
+
 
 
 
