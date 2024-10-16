@@ -59,9 +59,22 @@ def clean_data(df):
         return pd.DataFrame()
     # ตั้งค่า datetime เป็น index
     data_clean.set_index('datetime', inplace=True)
+
+    # ตรวจสอบว่า Index เป็นชนิด datetime หรือไม่
+    if not isinstance(data_clean.index, pd.DatetimeIndex):
+        data_clean.index = pd.to_datetime(data_clean.index)
+
+    # ลบค่า NaT ใน Index ถ้ามี
+    data_clean = data_clean[~data_clean.index.isna()]
+
+    if data_clean.empty:
+        st.error("หลังจากการตั้งค่า index แล้ว ข้อมูลว่างเปล่า กรุณาตรวจสอบข้อมูลของคุณ")
+        return pd.DataFrame()
+
     # ทำการ resample และคำนวณค่าเฉลี่ย
     data_clean = data_clean.resample('15T').mean()
     data_clean = data_clean.interpolate(method='linear')
+
     # จัดการกับ spike
     data_clean.sort_index(inplace=True)
     data_clean['diff'] = data_clean['wl_up'].diff().abs()
@@ -562,9 +575,9 @@ def train_and_forecast_LR(target_data, upstream_data=None, downstream_data=None,
             if not past_row.empty:
                 input_features[f'wl_up_target_lag_{lag}'] = past_row['wl_up'].values[0]
                 if use_upstream and f'wl_upstream_lag_{lag}' in current_data.columns:
-                    input_features[f'wl_upstream_lag_{lag}'] = past_row['wl_upstream'].values[0]
+                    input_features[f'wl_upstream_lag_{lag}'] = past_row.get('wl_upstream', past_row['wl_up']).values[0]
                 if use_downstream and f'wl_up_downstream_lag_{lag}' in current_data.columns:
-                    input_features[f'wl_up_downstream_lag_{lag}'] = past_row['wl_up_downstream'].values[0]
+                    input_features[f'wl_up_downstream_lag_{lag}'] = past_row.get('wl_up_downstream', past_row['wl_up']).values[0]
             else:
                 input_features[f'wl_up_target_lag_{lag}'] = np.nan
                 if use_upstream:
