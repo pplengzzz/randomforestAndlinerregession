@@ -44,45 +44,36 @@ def clean_data(df):
         return pd.DataFrame()
     data_clean['datetime'] = pd.to_datetime(data_clean['datetime'], errors='coerce')
     data_clean = data_clean.dropna(subset=['datetime'])
-
     if 'wl_up' not in data_clean.columns:
         st.error("ข้อมูลไม่มีคอลัมน์ 'wl_up' กรุณาตรวจสอบไฟล์ข้อมูลของคุณ")
         return pd.DataFrame()
-    # แปลงคอลัมน์ 'wl_up' เป็นตัวเลขและลบค่าที่ไม่ใช่ตัวเลข
     data_clean['wl_up'] = pd.to_numeric(data_clean['wl_up'], errors='coerce')
     data_clean = data_clean.dropna(subset=['wl_up'])
-    # กรองค่า wl_up ที่ไม่เหมาะสม
     data_clean = data_clean[(data_clean['wl_up'] >= -100)]
     data_clean = data_clean[(data_clean['wl_up'] != 0) & (~data_clean['wl_up'].isna())]
     if data_clean.empty:
         st.error("หลังจากการทำความสะอาดข้อมูลแล้ว ไม่มีข้อมูลเหลืออยู่ กรุณาตรวจสอบไฟล์ข้อมูลของคุณ")
         return pd.DataFrame()
-    # ตั้งค่า datetime เป็น index
     data_clean.set_index('datetime', inplace=True)
-
-    # ตรวจสอบว่า Index เป็นชนิด datetime หรือไม่
-    if not isinstance(data_clean.index, pd.DatetimeIndex):
-        data_clean.index = pd.to_datetime(data_clean.index)
-
     # ลบค่า NaT ใน Index ถ้ามี
-    data_clean = data_clean[~data_clean.index.isna()]
-
+    data_clean = data_clean[~data_clean.index.isnull()]
     if data_clean.empty:
         st.error("หลังจากการตั้งค่า index แล้ว ข้อมูลว่างเปล่า กรุณาตรวจสอบข้อมูลของคุณ")
         return pd.DataFrame()
-
-    # ทำการ resample และคำนวณค่าเฉลี่ย
+    if not isinstance(data_clean.index, pd.DatetimeIndex):
+        st.error("Index ไม่ใช่ชนิด DatetimeIndex ไม่สามารถทำการ resample ได้")
+        return pd.DataFrame()
+    if data_clean.select_dtypes(include=['number']).empty:
+        st.error("ไม่มีคอลัมน์ตัวเลขสำหรับการ resample")
+        return pd.DataFrame()
     data_clean = data_clean.resample('15T').mean()
     data_clean = data_clean.interpolate(method='linear')
-
-    # จัดการกับ spike
     data_clean.sort_index(inplace=True)
     data_clean['diff'] = data_clean['wl_up'].diff().abs()
     threshold = data_clean['diff'].median() * 5
-    data_clean['is_spike'] = data_clean['diff'] > threshold
-    data_clean.loc[data_clean['is_spike'], 'wl_up'] = np.nan
-    data_clean.drop(columns=['diff', 'is_spike'], inplace=True)
+    data_clean.loc[data_clean['diff'] > threshold, 'wl_up'] = np.nan
     data_clean['wl_up'] = data_clean['wl_up'].interpolate(method='linear')
+    data_clean.drop(columns=['diff'], inplace=True)
     data_clean.reset_index(inplace=True)
     return data_clean
 
@@ -181,7 +172,7 @@ def train_random_forest(X_train, y_train):
         n_iter=30,
         cv=tscv,
         n_jobs=-1,
-        verbose=2,
+        verbose=0,
         random_state=42,
         scoring='neg_mean_absolute_error'
     )
@@ -412,7 +403,7 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
         st.header("ผลค่าความแม่นยำ", divider='gray')
         st.info("ไม่สามารถคำนวณความแม่นยำได้เนื่องจากไม่มีการลบข้อมูล")
 
-# ฟังก์ชันสำหรับแสดงกราฟตัวอย่างข้อมูล
+# ฟังก์ชันสำหรับแสดงกราฟตัวอย่างข้อมูลที่อัปโหลด
 def plot_data_preview(df_pre, df_up_pre=None, df_down_pre=None, total_time_lag_upstream=pd.Timedelta(hours=0), total_time_lag_downstream=pd.Timedelta(hours=0)):
     data_pre1 = pd.DataFrame({
         'datetime': df_pre['datetime'],
@@ -897,11 +888,13 @@ if model_choice == "Random Forest":
         st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วย Random Forest")
 
 elif model_choice == "Linear Regression":
-    if process_button_lr:
-        if uploaded_file_lr is not None:
-            target_df_lr = load_data(uploaded_file_lr)
-            if target_df_lr is not None and not target_df_lr.empty:
-                target_df_lr['datetime'] = pd.to_datetime(target_df_lr['datetime'], errors='coerce').dt.tz_localize(None)
+    if uploaded_file_lr is not None:
+        target_df_lr = load_data(uploaded_file_lr)
+        if target_df_lr is not None and not target_df_lr.empty:
+            target_df_lr['datetime'] = pd.to_datetime(target_df_lr['datetime'], errors='coerce').dt.tz_localize(None)
+            # แสดงกราฟข้อมูลที่อัปโหลดทันที
+            plot_data_preview(target_df_lr, None, None)
+            if process_button_lr:
                 # กรองข้อมูลตามช่วงวันที่เลือก
                 training_start_datetime_lr = pd.Timestamp.combine(training_start_date_lr, training_start_time_lr)
                 training_end_datetime_lr = pd.Timestamp.combine(training_end_date_lr, training_end_time_lr)
@@ -950,13 +943,25 @@ elif model_choice == "Linear Regression":
 
                     if forecasted_data_lr is not None and not forecasted_data_lr.empty:
                         st.header("กราฟข้อมูลพร้อมการพยากรณ์ (Linear Regression)")
-                        # แสดงกราฟผลการพยากรณ์
+                        # แสดงกราฟผลการพยากรณ์พร้อมค่าจริงถ้ามี
                         fig = px.line(
-                            x=forecasted_data_lr['datetime'], 
-                            y=forecasted_data_lr['wl_up_pred'], 
-                            labels={'x': 'วันที่', 'y': 'ระดับน้ำ (wl_up_pred)'},
-                            title='ผลการพยากรณ์ระดับน้ำ'
+                            forecasted_data_lr, 
+                            x='datetime', 
+                            y='wl_up_pred', 
+                            labels={'datetime': 'วันที่', 'wl_up_pred': 'ระดับน้ำ (wl_up_pred)'},
+                            title='ผลการพยากรณ์ระดับน้ำ',
+                            color_discrete_sequence=['blue']
                         )
+                        # ถ้ามีค่าจริงในช่วงเวลานั้น
+                        merged_forecast_actual = pd.merge(forecasted_data_lr, target_df_lr[['datetime', 'wl_up']], on='datetime', how='left')
+                        if not merged_forecast_actual['wl_up'].isnull().all():
+                            fig.add_scatter(
+                                x=merged_forecast_actual['datetime'],
+                                y=merged_forecast_actual['wl_up'],
+                                mode='lines',
+                                name='ค่าจริง',
+                                line=dict(color='red')
+                            )
                         st.plotly_chart(fig, use_container_width=True)
 
                         # คำนวณค่าความแม่นยำ
@@ -981,10 +986,11 @@ elif model_choice == "Linear Regression":
                                 st.metric(label="R-squared (R²)", value=f"{r2_lr:.4f}")
                     else:
                         st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
-            else:
-                st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
         else:
             st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
+    else:
+        st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
+
 
 
 
