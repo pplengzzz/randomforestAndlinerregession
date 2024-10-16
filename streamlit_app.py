@@ -111,6 +111,13 @@ def create_moving_average_features(data, window=672):
 
 # ฟังก์ชันสำหรับเตรียมฟีเจอร์
 def prepare_features(data_clean, lags=[1, 4, 96, 192], window=672):
+    # สร้างฟีเจอร์เวลา
+    data_clean = create_time_features(data_clean)
+
+    # สร้างฟีเจอร์ wl_up_prev
+    data_clean['wl_up_prev'] = data_clean['wl_up'].shift(1)
+    data_clean['wl_up_prev'] = data_clean['wl_up_prev'].interpolate(method='linear')
+
     feature_cols = [
         'year', 'month', 'day', 'hour', 'minute',
         'day_of_week', 'day_of_year', 'week_of_year',
@@ -209,17 +216,14 @@ def fill_code_column(data):
     return data
 
 def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='random_forest'):
-    feature_cols = [
-        'year', 'month', 'day', 'hour', 'minute',
-        'day_of_week', 'day_of_year', 'week_of_year', 'days_in_month', 'wl_up_prev',
-        'lag_1', 'lag_4', 'lag_96', 'lag_192', 'ma_672'
-    ]
+    lags = [1, 4, 96, 192]
+    window = 672
 
     data = data_clean.copy()
 
     # Convert start_date and end_date to datetime
     start_date = pd.to_datetime(start_date)
-    end_date = pd.to_datetime(end_date) + pd.DateOffset(hours=23, minutes=45)
+    end_date = pd.to_datetime(end_date) + pd.DateOffset(days=1) - pd.Timedelta(minutes=15)
 
     # Filter data based on the datetime range
     data = data[(data['datetime'] >= start_date) & (data['datetime'] <= end_date)]
@@ -236,18 +240,19 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
     data_not_missing = data_with_all_dates.dropna(subset=['wl_up'])
 
     # เติมค่า missing ใน wl_up_prev
-    if 'wl_up_prev' in data_with_all_dates.columns:
-        data_with_all_dates['wl_up_prev'] = data_with_all_dates['wl_up_prev'].interpolate(method='linear')
-    else:
-        data_with_all_dates['wl_up_prev'] = data_with_all_dates['wl_up'].shift(1).interpolate(method='linear')
+    data_with_all_dates['wl_up_prev'] = data_with_all_dates['wl_up'].shift(1)
+    data_with_all_dates['wl_up_prev'] = data_with_all_dates['wl_up_prev'].interpolate(method='linear')
+
+    # สร้างฟีเจอร์เวลา
+    data_with_all_dates = create_time_features(data_with_all_dates)
 
     # สร้างฟีเจอร์ lag และค่าเฉลี่ยเคลื่อนที่
-    data_with_all_dates = create_lag_features(data_with_all_dates, lags=[1, 4, 96, 192])
-    data_with_all_dates = create_moving_average_features(data_with_all_dates, window=672)
+    data_with_all_dates = create_lag_features(data_with_all_dates, lags=lags)
+    data_with_all_dates = create_moving_average_features(data_with_all_dates, window=window)
 
     # เติมค่า missing ในฟีเจอร์ lag และ ma
-    lag_cols = ['lag_1', 'lag_4', 'lag_96', 'lag_192']
-    ma_col = 'ma_672'
+    lag_cols = [f'lag_{lag}' for lag in lags]
+    ma_col = f'ma_{window}'
     data_with_all_dates[lag_cols] = data_with_all_dates[lag_cols].interpolate(method='linear')
     data_with_all_dates[ma_col] = data_with_all_dates[ma_col].interpolate(method='linear')
 
@@ -260,13 +265,20 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
         return data_with_all_dates
 
     # Train initial model with all available data
-    X_train, y_train = prepare_features(data_not_missing)
+    X_train, y_train = prepare_features(data_not_missing, lags=lags, window=window)
     model = train_and_evaluate_model(X_train, y_train, model_type=model_type)
 
     # ตรวจสอบว่ามีโมเดลที่ถูกฝึกหรือไม่
     if model is None:
         st.error("ไม่สามารถสร้างโมเดลได้ กรุณาตรวจสอบข้อมูล")
         return data_with_all_dates
+
+    # เตรียมฟีเจอร์สำหรับการพยากรณ์
+    feature_cols = [
+        'year', 'month', 'day', 'hour', 'minute',
+        'day_of_week', 'day_of_year', 'week_of_year', 'days_in_month', 'wl_up_prev',
+        'lag_1', 'lag_4', 'lag_96', 'lag_192', 'ma_672'
+    ]
 
     # Fill missing values
     for idx, row in data_missing.iterrows():
@@ -276,27 +288,29 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
             # บันทึกค่าที่เติมในคอลัมน์ wl_forecast และ timestamp
             data_with_all_dates.loc[idx, 'wl_forecast'] = predicted_value
             data_with_all_dates.loc[idx, 'timestamp'] = pd.Timestamp.now()
+            # อัพเดตค่า wl_up ด้วยค่าที่พยากรณ์ เพื่อใช้ในการพยากรณ์ครั้งถัดไป
+            data_with_all_dates.loc[idx, 'wl_up'] = predicted_value
+            # อัพเดตฟีเจอร์ที่ต้องใช้ในการพยากรณ์
+            data_with_all_dates.loc[idx+1:, 'wl_up_prev'] = data_with_all_dates['wl_up'].shift(1)
+            data_with_all_dates.loc[idx+1:, lag_cols] = data_with_all_dates['wl_up'].shift(lags)
+            data_with_all_dates.loc[idx+1:, ma_col] = data_with_all_dates['wl_up'].rolling(window=window, min_periods=1).mean().shift(1)
         except Exception as e:
             st.warning(f"ไม่สามารถพยากรณ์ค่าในแถว {idx} ได้: {e}")
             continue
 
     # สร้างคอลัมน์ wl_up2 ที่รวมข้อมูลเดิมกับค่าที่เติม
-    data_with_all_dates['wl_up2'] = data_with_all_dates['wl_up'].combine_first(data_with_all_dates['wl_forecast'])
+    data_with_all_dates['wl_up2'] = data_with_all_dates['wl_up']
 
     data_with_all_dates.reset_index(drop=True, inplace=True)
     return data_with_all_dates
 
-def delete_data_by_date_range(data, delete_start_date, delete_end_date):
-    # Convert delete_start_date and delete_end_date to datetime
-    delete_start_date = pd.to_datetime(delete_start_date)
-    delete_end_date = pd.to_datetime(delete_end_date)
-
+def delete_data_by_date_range(data, delete_start_datetime, delete_end_datetime):
     # ตรวจสอบว่าช่วงวันที่ต้องการลบข้อมูลอยู่ในช่วงของ data หรือไม่
-    data_to_delete = data[(data['datetime'] >= delete_start_date) & (data['datetime'] <= delete_end_date)]
+    data_to_delete = data[(data['datetime'] >= delete_start_datetime) & (data['datetime'] <= delete_end_datetime)]
 
     # เพิ่มการตรวจสอบว่าถ้าจำนวนข้อมูลที่ถูกลบมีมากเกินไป
     if len(data_to_delete) == 0:
-        st.warning(f"ไม่พบข้อมูลระหว่าง {delete_start_date} และ {delete_end_date}.")
+        st.warning(f"ไม่พบข้อมูลระหว่าง {delete_start_datetime} และ {delete_end_datetime}.")
     elif len(data_to_delete) > (0.3 * len(data)):  # ตรวจสอบว่าถ้าลบเกิน 30% ของข้อมูล
         st.warning("คำเตือน: มีข้อมูลมากเกินไปที่จะลบ การดำเนินการลบถูกยกเลิก")
     else:
@@ -465,7 +479,7 @@ def merge_data(df1, df2=None, df3=None):
         merged_df = pd.merge(merged_df, df3[['datetime', 'wl_up']], on='datetime', how='left', suffixes=('', '_downstream'))
     return merged_df
 
-# ฟังก์ชันสำหรับการฝึกและพยากรณ์ด้วย Linear Regression (รองรับทั้งสถานีเดียวและสองสถานี)
+# ฟังก์ชันสำหรับการฝึกและพยากรณ์ด้วย Linear Regression
 def train_and_forecast_LR(target_data, upstream_data=None, downstream_data=None, use_upstream=False, use_downstream=False, forecast_days=2, travel_time_up=0, travel_time_down=0):
     # ทำความสะอาดข้อมูล
     target_data = clean_data(target_data)
@@ -569,20 +583,18 @@ def train_and_forecast_LR(target_data, upstream_data=None, downstream_data=None,
             past_row = current_data[current_data['datetime'] == past_time]
             if not past_row.empty:
                 input_features[f'wl_up_target_lag_{lag}'] = past_row['wl_up'].values[0]
-                if use_upstream and f'wl_upstream_lag_{lag}' in current_data.columns:
-                    input_features[f'wl_upstream_lag_{lag}'] = past_row.get('wl_upstream', past_row['wl_up']).values[0]
-                if use_downstream and f'wl_up_downstream_lag_{lag}' in current_data.columns:
-                    input_features[f'wl_up_downstream_lag_{lag}'] = past_row.get('wl_up_downstream', past_row['wl_up']).values[0]
+                if use_upstream and 'wl_upstream' in past_row.columns:
+                    input_features[f'wl_upstream_lag_{lag}'] = past_row['wl_upstream'].values[0]
+                if use_downstream and 'wl_up_downstream' in past_row.columns:
+                    input_features[f'wl_up_downstream_lag_{lag}'] = past_row['wl_up_downstream'].values[0]
             else:
-                input_features[f'wl_up_target_lag_{lag}'] = np.nan
-                if use_upstream:
-                    input_features[f'wl_upstream_lag_{lag}'] = np.nan
-                if use_downstream:
-                    input_features[f'wl_up_downstream_lag_{lag}'] = np.nan
+                # หากไม่มีข้อมูล ให้หยุดการพยากรณ์
+                st.warning(f"ไม่สามารถสร้างฟีเจอร์สำหรับวันที่ {date} ได้ เนื่องจากข้อมูลขาดหาย")
+                break
 
-        # ตรวจสอบค่าที่ขาดหาย
-        if any(pd.isna(v) for v in input_features.values()):
-            st.warning(f"ไม่สามารถสร้างฟีเจอร์สำหรับวันที่ {date} ได้ เนื่องจากข้อมูลขาดหาย")
+        if len(input_features) < len(features):
+            # หากฟีเจอร์ไม่ครบ ให้หยุดการพยากรณ์
+            st.warning(f"ฟีเจอร์ไม่ครบสำหรับวันที่ {date}")
             break
 
         # สร้าง DataFrame สำหรับการพยากรณ์
@@ -590,11 +602,6 @@ def train_and_forecast_LR(target_data, upstream_data=None, downstream_data=None,
 
         # จัดเรียงฟีเจอร์ให้ตรงกับลำดับที่ใช้ในการฝึกโมเดล
         input_df = input_df[features]
-
-        # ตรวจสอบว่าฟีเจอร์ครบถ้วน
-        if not all(feature in input_df.columns for feature in features):
-            st.warning(f"ขาดฟีเจอร์ในการพยากรณ์สำหรับวันที่ {date}")
-            break
 
         # ทำการพยากรณ์
         try:
@@ -610,10 +617,10 @@ def train_and_forecast_LR(target_data, upstream_data=None, downstream_data=None,
             'datetime': date,
             'wl_up': pred
         }
-        if use_upstream:
-            new_row['wl_upstream'] = pred  # สมมุติว่าค่า upstream เท่ากับ pred
-        if use_downstream:
-            new_row['wl_up_downstream'] = pred  # สมมุติว่าค่า downstream เท่ากับ pred
+        if use_upstream and 'wl_upstream' in input_features:
+            new_row['wl_upstream'] = input_features[f'wl_upstream_lag_{min(lags)}']
+        if use_downstream and 'wl_up_downstream' in input_features:
+            new_row['wl_up_downstream'] = input_features[f'wl_up_downstream_lag_{min(lags)}']
 
         # เพิ่มแถวใหม่ลงใน current_data โดยใช้ pd.concat แทน append
         new_row_df = pd.DataFrame([new_row])
@@ -681,6 +688,7 @@ with st.sidebar:
             use_downstream = st.checkbox("ต้องการใช้สถานี Downstream", value=False)
             
             # การอัปโหลดไฟล์สถานีหลักและสถานีน้ำ Upstream
+            uploaded_file = st.file_uploader("ข้อมูลระดับน้ำที่ต้องการทำนาย", type="csv", key="uploader1")
             if use_upstream:
                 uploaded_up_file = st.file_uploader("ข้อมูลระดับน้ำ Upstream", type="csv", key="uploader_up")
                 time_lag_upstream = st.number_input("ระบุเวลาห่างระหว่างสถานี Upstream (ชั่วโมง)", value=0, min_value=0)
@@ -697,9 +705,6 @@ with st.sidebar:
             else:
                 uploaded_down_file = None
                 total_time_lag_downstream = pd.Timedelta(hours=0)
-
-            # อัปโหลดไฟล์สถานีหลัก
-            uploaded_file = st.file_uploader("ข้อมูลระดับน้ำที่ต้องการทำนาย", type="csv", key="uploader1")
 
         # เลือกช่วงวันที่ใน sidebar
         with st.sidebar.expander("เลือกช่วงข้อมูลสำหรับฝึกโมเดล", expanded=False):
@@ -725,6 +730,7 @@ with st.sidebar:
             use_downstream_lr = st.checkbox("ต้องการใช้สถานี Downstream", value=False)
             
             # การอัปโหลดไฟล์สถานีหลักและสถานีน้ำ Upstream
+            uploaded_file_lr = st.file_uploader("ข้อมูลระดับน้ำที่ต้องการทำนาย", type="csv", key="uploader1_lr")
             if use_upstream_lr:
                 uploaded_up_file_lr = st.file_uploader("ข้อมูลระดับน้ำ Upstream", type="csv", key="uploader_up_lr")
                 time_lag_upstream_lr = st.number_input("ระบุเวลาห่างระหว่างสถานี Upstream (ชั่วโมง)", value=0, min_value=0, key="time_lag_upstream_lr")
@@ -739,9 +745,6 @@ with st.sidebar:
             else:
                 uploaded_down_file_lr = None
                 time_lag_downstream_lr = 0
-
-            # อัปโหลดไฟล์สถานีหลัก
-            uploaded_file_lr = st.file_uploader("ข้อมูลระดับน้ำที่ต้องการทำนาย", type="csv", key="uploader1_lr")
             
         # แยกการเลือกช่วงข้อมูลสำหรับฝึกโมเดลและการพยากรณ์
         with st.sidebar.expander("เลือกช่วงข้อมูลสำหรับฝึกโมเดล", expanded=False):
@@ -818,7 +821,7 @@ if model_choice == "Random Forest":
                     df['datetime'] = pd.to_datetime(df['datetime']).dt.tz_localize(None)
 
                     # ปรับค่า end_date เฉพาะถ้าเลือกช่วงเวลาแล้ว
-                    end_date_dt = pd.to_datetime(end_date) + pd.DateOffset(days=1)
+                    end_date_dt = pd.to_datetime(end_date) + pd.DateOffset(days=1) - pd.Timedelta(minutes=15)
 
                     # กรองข้อมูลตามช่วงวันที่เลือก
                     df_filtered = df[(df['datetime'] >= pd.to_datetime(start_date)) & (df['datetime'] <= end_date_dt)]
@@ -865,8 +868,8 @@ if model_choice == "Random Forest":
 
                     # ตรวจสอบว่าผู้ใช้เลือกที่จะลบข้อมูลหรือไม่
                     if delete_data_option:
-                        delete_start_datetime = pd.to_datetime(f"{delete_start_date} {delete_start_time}")
-                        delete_end_datetime = pd.to_datetime(f"{delete_end_date} {delete_end_time}") + pd.DateOffset(hours=23, minutes=45)
+                        delete_start_datetime = pd.Timestamp.combine(delete_start_date, delete_start_time)
+                        delete_end_datetime = pd.Timestamp.combine(delete_end_date, delete_end_time)
                         df_deleted = delete_data_by_date_range(df_merged, delete_start_datetime, delete_end_datetime)
                     else:
                         df_deleted = df_merged.copy()
@@ -876,14 +879,6 @@ if model_choice == "Random Forest":
 
                     # Fill NaN values in 'code' column
                     df_clean = fill_code_column(df_clean)
-
-                    # Create time features
-                    df_clean = create_time_features(df_clean)
-
-                    # เติมค่า missing ใน 'wl_up_prev'
-                    if 'wl_up_prev' not in df_clean.columns:
-                        df_clean['wl_up_prev'] = df_clean['wl_up'].shift(1)
-                    df_clean['wl_up_prev'] = df_clean['wl_up_prev'].interpolate(method='linear')
 
                     # Handle missing values by week
                     df_handled = handle_missing_values_by_week(df_clean, start_date, end_date, model_type='random_forest')
@@ -1016,6 +1011,7 @@ elif model_choice == "Linear Regression":
             st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
     else:
         st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
+
 
 
 
