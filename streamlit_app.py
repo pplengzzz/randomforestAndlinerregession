@@ -66,6 +66,10 @@ def clean_data(df):
     if data_clean.select_dtypes(include=['number']).empty:
         st.error("ไม่มีคอลัมน์ตัวเลขสำหรับการ resample")
         return pd.DataFrame()
+    # ตรวจสอบว่ามีข้อมูลเพียงพอสำหรับการ resample หรือไม่
+    if len(data_clean) < 2:
+        st.error("มีข้อมูลไม่เพียงพอสำหรับการ resample")
+        return pd.DataFrame()
     data_clean = data_clean.resample('15T').mean()
     data_clean = data_clean.interpolate(method='linear')
     data_clean.sort_index(inplace=True)
@@ -766,6 +770,8 @@ if model_choice == "Random Forest":
 
             if df is not None:
                 df_pre = clean_data(df)
+                if df_pre.empty:
+                    st.stop()
                 df_pre = generate_missing_dates(df_pre)
 
                 # ถ้าเลือกใช้ไฟล์ Upstream
@@ -774,6 +780,8 @@ if model_choice == "Random Forest":
                         df_up = load_data(uploaded_up_file)
                         if df_up is not None:
                             df_up_pre = clean_data(df_up)
+                            if df_up_pre.empty:
+                                st.stop()
                             df_up_pre = generate_missing_dates(df_up_pre)
                         else:
                             df_up_pre = None
@@ -789,6 +797,8 @@ if model_choice == "Random Forest":
                         df_down = load_data(uploaded_down_file)
                         if df_down is not None:
                             df_down_pre = clean_data(df_down)
+                            if df_down_pre.empty:
+                                st.stop()
                             df_down_pre = generate_missing_dates(df_down_pre)
                         else:
                             df_down_pre = None
@@ -844,6 +854,8 @@ if model_choice == "Random Forest":
 
                     # ทำความสะอาดข้อมูลหลัก
                     df_clean = clean_data(df_filtered)
+                    if df_clean.empty:
+                        st.stop()
 
                     # เก็บข้อมูลหลังการทำความสะอาดแต่ก่อนการรวมข้อมูล
                     df_before_deletion = df_clean.copy()
@@ -926,6 +938,20 @@ elif model_choice == "Linear Regression":
                     else:
                         downstream_df_lr = None
 
+                    # ทำความสะอาดข้อมูล
+                    target_df_lr = clean_data(target_df_lr)
+                    if target_df_lr.empty:
+                        st.stop()
+
+                    if use_upstream_lr and upstream_df_lr is not None:
+                        upstream_df_lr = clean_data(upstream_df_lr)
+                        if upstream_df_lr.empty:
+                            st.stop()
+                    if use_downstream_lr and downstream_df_lr is not None:
+                        downstream_df_lr = clean_data(downstream_df_lr)
+                        if downstream_df_lr.empty:
+                            st.stop()
+
                     # แสดงกราฟข้อมูลที่อัปโหลด
                     plot_data_preview(target_df_lr, upstream_df_lr, downstream_df_lr, 
                                       pd.Timedelta(hours=time_lag_upstream_lr), pd.Timedelta(hours=time_lag_downstream_lr))
@@ -990,6 +1016,7 @@ elif model_choice == "Linear Regression":
             st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
     else:
         st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
+
 
 
 
