@@ -70,7 +70,9 @@ def clean_data(df):
     if len(data_clean) < 2:
         st.error("มีข้อมูลไม่เพียงพอสำหรับการ resample")
         return pd.DataFrame()
-    data_clean = data_clean.resample('15T').mean()
+    # เลือกเฉพาะคอลัมน์ตัวเลขก่อนทำการ resample
+    numeric_cols = data_clean.select_dtypes(include=['number']).columns
+    data_clean = data_clean[numeric_cols].resample('15T').mean()
     data_clean = data_clean.interpolate(method='linear')
     data_clean.sort_index(inplace=True)
     data_clean['diff'] = data_clean['wl_up'].diff().abs()
@@ -1011,6 +1013,7 @@ elif model_choice == "Linear Regression":
             st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
     else:
         st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
+
 
 
 
