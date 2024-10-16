@@ -493,12 +493,12 @@ def train_and_forecast_LR(target_data, upstream_data=None, downstream_data=None,
         # รวมข้อมูล
         target_data = pd.merge(target_data, downstream_data[['datetime', 'wl_up']], on='datetime', how='left', suffixes=('', '_downstream'))
 
-    # เติมค่าที่ขาดหายด้วยวิธี Forward Fill สำหรับ upstream และ downstream (ถ้ามี)
+    # เติมค่าที่ขาดหายด้วยวิธี Interpolate สำหรับ target_data และสถานีอื่นๆ
+    target_data['wl_up'] = target_data['wl_up'].interpolate(method='linear')
     if use_upstream and 'wl_upstream' in target_data.columns:
-        target_data['wl_upstream'] = target_data['wl_upstream'].ffill()
-
+        target_data['wl_upstream'] = target_data['wl_upstream'].interpolate(method='linear')
     if use_downstream and 'wl_up_downstream' in target_data.columns:
-        target_data['wl_up_downstream'] = target_data['wl_up_downstream'].ffill()
+        target_data['wl_up_downstream'] = target_data['wl_up_downstream'].interpolate(method='linear')
 
     # สร้างฟีเจอร์แบบล่าช้า (Lag Features)
     lags = [1, 2, 4, 8]  # ล่าช้า 15 นาที, 30 นาที, 1 ชั่วโมง, และ 2 ชั่วโมง
@@ -546,6 +546,15 @@ def train_and_forecast_LR(target_data, upstream_data=None, downstream_data=None,
 
     # ฝึกโมเดลบนชุดข้อมูลทั้งหมด
     pipeline.fit(X, y)
+
+    # เติมค่าที่ขาดหายไปในข้อมูลเดิมด้วยโมเดล
+    if target_data['wl_up'].isnull().any():
+        missing_indices = target_data[target_data['wl_up'].isnull()].index
+        for idx in missing_indices:
+            row = target_data.loc[idx]
+            input_features = row[features].values.reshape(1, -1)
+            pred = pipeline.predict(input_features)[0]
+            target_data.loc[idx, 'wl_up'] = pred
 
     # การพยากรณ์อนาคต
     future_dates = pd.date_range(
@@ -609,7 +618,8 @@ def train_and_forecast_LR(target_data, upstream_data=None, downstream_data=None,
         if use_downstream:
             new_row['wl_up_downstream'] = input_features.get(f'wl_up_downstream_lag_{min(lags)}', np.nan)
 
-        current_data = current_data.append(new_row, ignore_index=True)
+        new_row_df = pd.DataFrame([new_row])
+        current_data = pd.concat([current_data, new_row_df], ignore_index=True)
 
     # รวมข้อมูลจริงและข้อมูลพยากรณ์เข้าด้วยกัน
     future_df = pd.DataFrame(future_predictions)
@@ -1032,6 +1042,7 @@ elif model_choice == "Linear Regression":
                 st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
     else:
         st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วย Linear Regression")
+
 
 
 
