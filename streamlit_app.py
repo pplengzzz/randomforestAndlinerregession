@@ -354,17 +354,20 @@ def calculate_accuracy_metrics(original, filled, data_deleted):
         st.metric(label="R-squared (R²)", value=f"{r2:.4f}")
 
 # ฟังก์ชันสำหรับสร้างกราฟและตารางข้อมูล
-def plot_results(data_before, data_filled, data_deleted, data_deleted_option=False):
+def plot_results(data_before, data_filled, data_deleted, model_type='random_forest', data_deleted_option=False):
+    # สร้าง DataFrame สำหรับข้อมูลก่อนเติมค่า
     data_before_filled = pd.DataFrame({
         'วันที่': data_before['datetime'],
         'ข้อมูลเดิม': data_before['wl_up']
     })
 
+    # สร้าง DataFrame สำหรับข้อมูลหลังเติมค่า
     data_after_filled = pd.DataFrame({
         'วันที่': data_filled['datetime'],
         'ข้อมูลหลังเติมค่า': data_filled['wl_up2']
     })
 
+    # สร้าง DataFrame สำหรับข้อมูลหลังลบ (ถ้ามี)
     if data_deleted_option:
         data_after_deleted = pd.DataFrame({
             'วันที่': data_deleted['datetime'],
@@ -373,19 +376,7 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
     else:
         data_after_deleted = None
 
-    # ผสานข้อมูลเพื่อให้แน่ใจว่าค่า wl_up ก่อนถูกลบแสดงในตาราง
-    data_filled_with_original = pd.merge(
-        data_filled,
-        data_before[['datetime', 'wl_up']],
-        on='datetime',
-        how='left',
-        suffixes=('', '_original')
-    )
-
-    # แทนที่ค่า 'wl_up' ใน data_filled ด้วยค่า wl_up ดั้งเดิม
-    data_filled_with_original['wl_up'] = data_filled_with_original['wl_up_original']
-
-    # รวมข้อมูลสำหรับกราฟ
+    # ผสานข้อมูลสำหรับกราฟ
     combined_data = pd.merge(data_before_filled, data_after_filled, on='วันที่', how='outer')
 
     if data_after_deleted is not None:
@@ -409,7 +400,9 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
 
     # แสดงตารางข้อมูลหลังเติมค่า
     st.header("ตารางแสดงข้อมูลหลังเติมค่า", divider='gray')
-    data_filled_selected = data_filled_with_original[['code', 'datetime', 'wl_up', 'wl_forecast', 'timestamp']]
+    data_filled_selected = data_filled[['datetime', 'wl_up', 'wl_forecast', 'timestamp']].copy()
+    if 'code' in data_filled.columns:
+        data_filled_selected['code'] = data_filled['code']
     st.dataframe(data_filled_selected, use_container_width=True)
 
     # ตรวจสอบว่ามีค่าจริงให้เปรียบเทียบหรือไม่ก่อนเรียกฟังก์ชันคำนวณความแม่นยำ
@@ -760,6 +753,16 @@ with st.sidebar:
 
         process_button_lr = st.button("ประมวลผล Linear Regression", type="primary")
 
+# ฟังก์ชันสำหรับแสดงผลกราฟและตารางสำหรับทั้ง RF และ LR
+def display_model_results(model_type, data_before, data_handled, data_deleted, delete_data_option):
+    plot_results(
+        data_before=data_before,
+        data_filled=data_handled,
+        data_deleted=data_deleted,
+        model_type=model_type,
+        data_deleted_option=delete_data_option
+    )
+
 # Main content: Display results after file uploads and date selection
 if model_choice == "Random Forest":
     if uploaded_file or uploaded_up_file or uploaded_down_file:
@@ -889,7 +892,13 @@ if model_choice == "Random Forest":
                     processing_placeholder.empty()
 
                     # Plot the results using Streamlit's line chart
-                    plot_results(df_before_deletion, df_handled, df_deleted, data_deleted_option=delete_data_option)
+                    display_model_results(
+                        model_type='random_forest',
+                        data_before=df_before_deletion,
+                        data_handled=df_handled,
+                        data_deleted=df_deleted,
+                        delete_data_option=delete_data_option
+                    )
 
             st.markdown("---")
 
@@ -897,122 +906,131 @@ if model_choice == "Random Forest":
         st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วย Random Forest")
 
 elif model_choice == "Linear Regression":
-    if uploaded_file_lr is not None:
-        target_df_lr = load_data(uploaded_file_lr)
-        if target_df_lr is not None and not target_df_lr.empty:
-            target_df_lr['datetime'] = pd.to_datetime(target_df_lr['datetime'], errors='coerce').dt.tz_localize(None)
-            # แสดงกราฟข้อมูลที่อัปโหลดทันที
-            plot_data_preview(target_df_lr, None, None)
-            if process_button_lr:
-                # กรองข้อมูลตามช่วงวันที่เลือก
-                training_start_datetime_lr = pd.Timestamp.combine(training_start_date_lr, training_start_time_lr)
-                training_end_datetime_lr = pd.Timestamp.combine(training_end_date_lr, training_end_time_lr)
-                target_df_lr = target_df_lr[
-                    (target_df_lr['datetime'] >= training_start_datetime_lr) & 
-                    (target_df_lr['datetime'] <= training_end_datetime_lr)
-                ]
+    if uploaded_file_lr or uploaded_up_file_lr or uploaded_down_file_lr:
+        if uploaded_file_lr is None:
+            st.warning("กรุณาอัปโหลดไฟล์ข้อมูลระดับน้ำที่ต้องการทำนายสำหรับ Linear Regression")
+        if use_upstream_lr and uploaded_up_file_lr is None:
+            st.warning("กรุณาอัปโหลดไฟล์ข้อมูลระดับน้ำ Upstream สำหรับ Linear Regression")
+        if use_downstream_lr and uploaded_down_file_lr is None:
+            st.warning("กรุณาอัปโหลดไฟล์ข้อมูลระดับน้ำ Downstream สำหรับ Linear Regression")
 
-                if target_df_lr.empty:
-                    st.error("ไม่มีข้อมูลในช่วงเวลาที่เลือกสำหรับการฝึกโมเดล")
-                else:
-                    if use_upstream_lr and uploaded_up_file_lr is not None:
-                        upstream_df_lr = load_data(uploaded_up_file_lr)
-                        if upstream_df_lr is not None and not upstream_df_lr.empty:
-                            upstream_df_lr['datetime'] = pd.to_datetime(upstream_df_lr['datetime'], errors='coerce').dt.tz_localize(None)
+        if uploaded_file_lr and (not use_upstream_lr or uploaded_up_file_lr) and (not use_downstream_lr or uploaded_down_file_lr):
+            target_df_lr = load_data(uploaded_file_lr)
+
+            if target_df_lr is not None:
+                target_df_lr['datetime'] = pd.to_datetime(target_df_lr['datetime'], errors='coerce').dt.tz_localize(None)
+                # แสดงกราฟข้อมูลที่อัปโหลดทันที
+                plot_data_preview(target_df_lr, None, None)
+                if process_button_lr:
+                    # กรองข้อมูลตามช่วงวันที่เลือก
+                    training_start_datetime_lr = pd.Timestamp.combine(training_start_date_lr, training_start_time_lr)
+                    training_end_datetime_lr = pd.Timestamp.combine(training_end_date_lr, training_end_time_lr)
+                    target_df_lr = target_df_lr[
+                        (target_df_lr['datetime'] >= training_start_datetime_lr) & 
+                        (target_df_lr['datetime'] <= training_end_datetime_lr)
+                    ]
+
+                    if target_df_lr.empty:
+                        st.error("ไม่มีข้อมูลในช่วงเวลาที่เลือกสำหรับการฝึกโมเดล")
+                    else:
+                        if use_upstream_lr and uploaded_up_file_lr is not None:
+                            upstream_df_lr = load_data(uploaded_up_file_lr)
+                            if upstream_df_lr is not None and not upstream_df_lr.empty:
+                                upstream_df_lr['datetime'] = pd.to_datetime(upstream_df_lr['datetime'], errors='coerce').dt.tz_localize(None)
+                            else:
+                                upstream_df_lr = None
+                                st.warning("ข้อมูล Upstream ว่างเปล่าหรือมีปัญหา")
                         else:
                             upstream_df_lr = None
-                            st.warning("ข้อมูล Upstream ว่างเปล่าหรือมีปัญหา")
-                    else:
-                        upstream_df_lr = None
 
-                    if use_downstream_lr and uploaded_down_file_lr is not None:
-                        downstream_df_lr = load_data(uploaded_down_file_lr)
-                        if downstream_df_lr is not None and not downstream_df_lr.empty:
-                            downstream_df_lr['datetime'] = pd.to_datetime(downstream_df_lr['datetime'], errors='coerce').dt.tz_localize(None)
+                        if use_downstream_lr and uploaded_down_file_lr is not None:
+                            downstream_df_lr = load_data(uploaded_down_file_lr)
+                            if downstream_df_lr is not None and not downstream_df_lr.empty:
+                                downstream_df_lr['datetime'] = pd.to_datetime(downstream_df_lr['datetime'], errors='coerce').dt.tz_localize(None)
+                            else:
+                                downstream_df_lr = None
+                                st.warning("ข้อมูล Downstream ว่างเปล่าหรือมีปัญหา")
                         else:
                             downstream_df_lr = None
-                            st.warning("ข้อมูล Downstream ว่างเปล่าหรือมีปัญหา")
-                    else:
-                        downstream_df_lr = None
 
-                    # ทำความสะอาดข้อมูล
-                    target_df_lr = clean_data(target_df_lr)
-                    if target_df_lr.empty:
-                        st.stop()
-
-                    if use_upstream_lr and upstream_df_lr is not None:
-                        upstream_df_lr = clean_data(upstream_df_lr)
-                        if upstream_df_lr.empty:
-                            st.stop()
-                    if use_downstream_lr and downstream_df_lr is not None:
-                        downstream_df_lr = clean_data(downstream_df_lr)
-                        if downstream_df_lr.empty:
+                        # ทำความสะอาดข้อมูล
+                        target_df_lr = clean_data(target_df_lr)
+                        if target_df_lr.empty:
                             st.stop()
 
-                    # แสดงกราฟข้อมูลที่อัปโหลด
-                    plot_data_preview(target_df_lr, upstream_df_lr, downstream_df_lr, 
-                                      pd.Timedelta(hours=time_lag_upstream_lr), pd.Timedelta(hours=time_lag_downstream_lr))
+                        if use_upstream_lr and upstream_df_lr is not None:
+                            upstream_df_lr = clean_data(upstream_df_lr)
+                            if upstream_df_lr.empty:
+                                st.stop()
+                        if use_downstream_lr and downstream_df_lr is not None:
+                            downstream_df_lr = clean_data(downstream_df_lr)
+                            if downstream_df_lr.empty:
+                                st.stop()
 
-                    forecasted_data_lr = train_and_forecast_LR(
-                        target_df_lr,
-                        upstream_data=upstream_df_lr,
-                        downstream_data=downstream_df_lr,
-                        use_upstream=use_upstream_lr,
-                        use_downstream=use_downstream_lr,
-                        forecast_days=forecast_days_lr,
-                        travel_time_up=time_lag_upstream_lr,
-                        travel_time_down=time_lag_downstream_lr
-                    )
+                        # แสดงกราฟข้อมูลที่อัปโหลด
+                        plot_data_preview(target_df_lr, upstream_df_lr, downstream_df_lr, 
+                                          pd.Timedelta(hours=time_lag_upstream_lr), pd.Timedelta(hours=time_lag_downstream_lr))
 
-                    if forecasted_data_lr is not None and not forecasted_data_lr.empty:
-                        st.header("กราฟข้อมูลพร้อมการพยากรณ์ (Linear Regression)")
-                        # แสดงกราฟผลการพยากรณ์พร้อมค่าจริงถ้ามี
-                        fig = px.line(
-                            forecasted_data_lr, 
-                            x='datetime', 
-                            y='wl_up_pred', 
-                            labels={'datetime': 'วันที่', 'wl_up_pred': 'ระดับน้ำ (wl_up_pred)'},
-                            title='ผลการพยากรณ์ระดับน้ำ',
-                            color_discrete_sequence=['blue']
+                        forecasted_data_lr = train_and_forecast_LR(
+                            target_data=target_df_lr,
+                            upstream_data=upstream_df_lr,
+                            downstream_data=downstream_df_lr,
+                            use_upstream=use_upstream_lr,
+                            use_downstream=use_downstream_lr,
+                            forecast_days=forecast_days_lr,
+                            travel_time_up=time_lag_upstream_lr,
+                            travel_time_down=time_lag_downstream_lr
                         )
-                        # ถ้ามีค่าจริงในช่วงเวลานั้น
-                        merged_forecast_actual = pd.merge(forecasted_data_lr, target_df_lr[['datetime', 'wl_up']], on='datetime', how='left')
-                        if not merged_forecast_actual['wl_up'].isnull().all():
-                            fig.add_scatter(
-                                x=merged_forecast_actual['datetime'],
-                                y=merged_forecast_actual['wl_up'],
-                                mode='lines',
-                                name='ค่าจริง',
-                                line=dict(color='red')
+
+                        if forecasted_data_lr is not None and not forecasted_data_lr.empty:
+                            st.header("กราฟข้อมูลพร้อมการพยากรณ์ (Linear Regression)")
+                            # แสดงกราฟผลการพยากรณ์พร้อมค่าจริงถ้ามี
+                            fig = px.line(
+                                forecasted_data_lr, 
+                                x='datetime', 
+                                y='wl_up_pred', 
+                                labels={'datetime': 'วันที่', 'wl_up_pred': 'ระดับน้ำ (wl_up_pred)'},
+                                title='ผลการพยากรณ์ระดับน้ำ',
+                                color_discrete_sequence=['blue']
                             )
-                        st.plotly_chart(fig, use_container_width=True)
+                            # ถ้ามีค่าจริงในช่วงเวลานั้น
+                            merged_forecast_actual = pd.merge(forecasted_data_lr, target_df_lr[['datetime', 'wl_up']], on='datetime', how='left')
+                            if not merged_forecast_actual['wl_up'].isnull().all():
+                                fig.add_scatter(
+                                    x=merged_forecast_actual['datetime'],
+                                    y=merged_forecast_actual['wl_up'],
+                                    mode='lines',
+                                    name='ค่าจริง',
+                                    line=dict(color='red')
+                                )
+                            st.plotly_chart(fig, use_container_width=True)
 
-                        # คำนวณค่าความแม่นยำ
-                        mse_lr, mae_lr, r2_lr, merged_data_lr = calculate_accuracy_metrics_linear(
-                            original=target_df_lr,
-                            forecasted=forecasted_data_lr
-                        )
+                            # คำนวณค่าความแม่นยำ
+                            mse_lr, mae_lr, r2_lr, merged_data_lr = calculate_accuracy_metrics_linear(
+                                original=target_df_lr,
+                                forecasted=forecasted_data_lr
+                            )
 
-                        if mse_lr is not None:
-                            st.header("ตารางข้อมูลเปรียบเทียบ")
-                            comparison_table_lr = create_comparison_table_streamlit(forecasted_data_lr, merged_data_lr)
-                            st.dataframe(comparison_table_lr, use_container_width=True)
-                            
-                            st.header("ผลค่าความแม่นยำ")
-                            st.markdown("---")
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric(label="Mean Squared Error (MSE)", value=f"{mse_lr:.4f}")
-                            with col2:
-                                st.metric(label="Mean Absolute Error (MAE)", value=f"{mae_lr:.4f}")
-                            with col3:
-                                st.metric(label="R-squared (R²)", value=f"{r2_lr:.4f}")
-                    else:
-                        st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
-        else:
-            st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
+                            if mse_lr is not None:
+                                st.header("ตารางข้อมูลเปรียบเทียบ")
+                                comparison_table_lr = create_comparison_table_streamlit(forecasted_data_lr, merged_data_lr)
+                                st.dataframe(comparison_table_lr, use_container_width=True)
+                                
+                                st.header("ผลค่าความแม่นยำ")
+                                st.markdown("---")
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric(label="Mean Squared Error (MSE)", value=f"{mse_lr:.4f}")
+                                with col2:
+                                    st.metric(label="Mean Absolute Error (MAE)", value=f"{mae_lr:.4f}")
+                                with col3:
+                                    st.metric(label="R-squared (R²)", value=f"{r2_lr:.4f}")
+                        else:
+                            st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
+            else:
+                st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
     else:
-        st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
+        st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วย Linear Regression")
 
 
 
