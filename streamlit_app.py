@@ -467,7 +467,7 @@ def merge_data_linear(df1, df2=None):
 # ฟังก์ชันสำหรับสร้างกราฟข้อมูลจากสถานีทั้งสอง (สำหรับ Linear Regression)
 def plot_data_combined_LR_stations(data, forecasted=None, upstream_data=None, downstream_data=None, label='ระดับน้ำ'):
     # กราฟแรก: ข้อมูลจริง
-    fig_actual = px.line(data, x=data.index, y='wl_up', title=f'ระดับน้ำจริงที่สถานี {label}', labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
+    fig_actual = px.line(data, x=data.index, y='wl_up', title=f'ระดับน้ำจริงที่สถานี {label}', labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'}, color_discrete_sequence=['blue'])
     fig_actual.update_traces(connectgaps=False, name='สถานีที่ต้องการพยากรณ์')
     
     # แสดงค่าจริงของสถานี Upstream (ถ้ามี)
@@ -487,8 +487,8 @@ def plot_data_combined_LR_stations(data, forecasted=None, upstream_data=None, do
         forecast_end = forecasted.index.max()
         actual_forecast_period = data[(data.index >= forecast_start) & (data.index <= forecast_end)]
         
-        fig_forecast = px.line(forecasted, x=forecasted.index, y='wl_up', title='ระดับน้ำที่พยากรณ์', labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
-        fig_forecast.update_traces(connectgaps=False, name='ค่าที่พยากรณ์', line=dict(color='red'))
+        fig_forecast = px.line(forecasted, x=forecasted.index, y='wl_up', title='ระดับน้ำที่พยากรณ์', labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'}, color_discrete_sequence=['red'])
+        fig_forecast.update_traces(connectgaps=False, name='ค่าที่พยากรณ์')
         
         # เทียบกับค่าจริงในช่วงพยากรณ์
         if not actual_forecast_period.empty:
@@ -694,7 +694,7 @@ st.set_page_config(
 
 st.markdown("""
 # การพยากรณ์ระดับน้ำ
-
+    
 แอป Streamlit สำหรับจัดการข้อมูลระดับน้ำ โดยใช้โมเดล **Random Forest** หรือ **Linear Regression** เพื่อเติมค่าที่ขาดหายไปและพยากรณ์ข้อมูล
 ข้อมูลถูกประมวลผลและแสดงผลผ่านกราฟและการวัดค่าความแม่นยำ ผู้ใช้สามารถเลือกอัปโหลดไฟล์, 
 กำหนดช่วงเวลาลบข้อมูล และเลือกวิธีการพยากรณ์ได้
@@ -812,15 +812,24 @@ with st.sidebar:
         with st.sidebar.expander("ตั้งค่าการพยากรณ์", expanded=False):
             forecast_days_lr = st.number_input("จำนวนวันที่ต้องการพยากรณ์", value=3, min_value=1, step=1)
 
-        # ตั้งค่าการลบข้อมูลสำหรับ Linear Regression
-        with st.sidebar.expander("ตั้งค่าการลบข้อมูล (Linear Regression)", expanded=False):
-            delete_data_option_lr = st.checkbox("ต้องการเลือกลบข้อมูล", value=False)
-            if delete_data_option_lr:
-                st.subheader("เลือกช่วงที่ต้องการลบข้อมูล")
-                delete_start_date_lr = st.date_input("กำหนดเริ่มต้นลบข้อมูล (LR)", value=training_start_date_lr, key='delete_start_lr')
-                delete_start_time_lr = st.time_input("เวลาเริ่มต้น (LR)", value=pd.Timestamp("00:00:00").time(), key='delete_start_time_lr')
-                delete_end_date_lr = st.date_input("กำหนดสิ้นสุดลบข้อมูล (LR)", value=training_end_date_lr, key='delete_end_lr')
-                delete_end_time_lr = st.time_input("เวลาสิ้นสุด (LR)", value=pd.Timestamp("23:45:00").time(), key='delete_end_time_lr')
+        # เพิ่มตัวเลือกประเภทการพยากรณ์
+        with st.sidebar.expander("เลือกประเภทการพยากรณ์ (Linear Regression)", expanded=False):
+            forecast_type_lr = st.radio(
+                "ประเภทการพยากรณ์",
+                ("เติมข้อมูลที่ลบ", "พยากรณ์ไปข้างหน้า"),
+                index=0
+            )
+
+            if forecast_type_lr == "เติมข้อมูลที่ลบ":
+                delete_data_option_lr = st.checkbox("ต้องการเลือกลบข้อมูล", value=False)
+                if delete_data_option_lr:
+                    st.subheader("เลือกช่วงที่ต้องการลบข้อมูล")
+                    delete_start_date_lr = st.date_input("กำหนดเริ่มต้นลบข้อมูล (LR)", value=training_start_date_lr, key='delete_start_lr')
+                    delete_start_time_lr = st.time_input("เวลาเริ่มต้น (LR)", value=pd.Timestamp("00:00:00").time(), key='delete_start_time_lr')
+                    delete_end_date_lr = st.date_input("กำหนดสิ้นสุดลบข้อมูล (LR)", value=training_end_date_lr, key='delete_end_lr')
+                    delete_end_time_lr = st.time_input("เวลาสิ้นสุด (LR)", value=pd.Timestamp("23:45:00").time(), key='delete_end_time_lr')
+            else:
+                delete_data_option_lr = False  # ไม่ต้องลบข้อมูล
 
         process_button_lr = st.button("ประมวลผล Linear Regression", type="primary")
 
@@ -959,7 +968,7 @@ if model_choice == "Random Forest":
                     # Plot the results using Streamlit's line chart
                     plot_results(df_before_deletion, df_handled, df_deleted, data_deleted_option=delete_data_option)
 
-            st.markdown("---")
+        st.markdown("---")
 
     else:
         st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วย Random Forest")
@@ -1024,7 +1033,7 @@ elif model_choice == "Linear Regression":
                         merged_training_data_lr = merge_data_linear(target_df_lr)
 
                     # **Handle Data Deletion Here**
-                    if delete_data_option_lr:
+                    if forecast_type_lr == "เติมข้อมูลที่ลบ" and delete_data_option_lr:
                         delete_start_datetime_lr = pd.to_datetime(f"{delete_start_date_lr} {delete_start_time_lr}")
                         delete_end_datetime_lr = pd.to_datetime(f"{delete_end_date_lr} {delete_end_time_lr}") + pd.DateOffset(minutes=15)
                         merged_training_data_lr_before_deletion = merged_training_data_lr.copy()  # Keep a copy for comparison
@@ -1047,22 +1056,39 @@ elif model_choice == "Linear Regression":
                                 st.error("ไม่มีข้อมูลในช่วงเวลาที่เลือกสำหรับการฝึกโมเดล")
                                 st.stop()
                             else:
-                                forecast_start_date_actual_lr = training_end_datetime_lr + pd.Timedelta(minutes=15)
-                                forecast_end_date_actual_lr = forecast_start_date_actual_lr + pd.Timedelta(days=forecast_days_lr)
+                                if forecast_type_lr == "เติมข้อมูลที่ลบ":
+                                    forecast_start_date_actual_lr = training_end_datetime_lr + pd.Timedelta(minutes=15)
+                                    forecast_days_lr_effective = 0  # ไม่ต้องพยากรณ์ไปข้างหน้า
+                                else:
+                                    forecast_start_date_actual_lr = training_end_datetime_lr + pd.Timedelta(minutes=15)
+                                    forecast_days_lr_effective = forecast_days_lr
+                                
+                                forecast_end_date_actual_lr = forecast_start_date_actual_lr + pd.Timedelta(days=forecast_days_lr_effective)
                                 max_datetime_lr = target_df_lr['datetime'].max()
 
                                 if forecast_end_date_actual_lr > max_datetime_lr:
                                     st.warning("ข้อมูลจริงในช่วงเวลาที่พยากรณ์ไม่ครบถ้วนหรือไม่มีข้อมูล")
 
-                                forecasted_data_lr = forecast_with_linear_regression_multi(
-                                    data=target_df_lr.set_index('datetime'),
-                                    upstream_data=upstream_df_lr.set_index('datetime') if upstream_df_lr is not None else None,
-                                    downstream_data=downstream_df_lr.set_index('datetime') if downstream_df_lr is not None else None,
-                                    forecast_start_date=forecast_start_date_actual_lr,
-                                    forecast_days=forecast_days_lr,
-                                    delay_hours_up=delay_hours_up_lr if use_nearby_lr and use_upstream_lr else 0,
-                                    delay_hours_down=delay_hours_down_lr if use_nearby_lr and use_downstream_lr else 0
-                                )
+                                if forecast_type_lr == "เติมข้อมูลที่ลบ":
+                                    forecasted_data_lr = forecast_with_linear_regression_multi(
+                                        data=target_df_lr.set_index('datetime'),
+                                        upstream_data=upstream_df_lr.set_index('datetime') if upstream_df_lr is not None else None,
+                                        downstream_data=downstream_df_lr.set_index('datetime') if downstream_df_lr is not None else None,
+                                        forecast_start_date=forecast_start_date_actual_lr,
+                                        forecast_days=forecast_days_lr_effective,
+                                        delay_hours_up=delay_hours_up_lr if use_nearby_lr and use_upstream_lr else 0,
+                                        delay_hours_down=delay_hours_down_lr if use_nearby_lr and use_downstream_lr else 0
+                                    )
+                                else:
+                                    forecasted_data_lr = forecast_with_linear_regression_multi(
+                                        data=target_df_lr.set_index('datetime'),
+                                        upstream_data=upstream_df_lr.set_index('datetime') if upstream_df_lr is not None else None,
+                                        downstream_data=downstream_df_lr.set_index('datetime') if downstream_df_lr is not None else None,
+                                        forecast_start_date=forecast_start_date_actual_lr,
+                                        forecast_days=forecast_days_lr_effective,
+                                        delay_hours_up=delay_hours_up_lr if use_nearby_lr and use_upstream_lr else 0,
+                                        delay_hours_down=delay_hours_down_lr if use_nearby_lr and use_downstream_lr else 0
+                                    )
 
                                 if not forecasted_data_lr.empty:
                                     st.header("กราฟข้อมูลพร้อมการพยากรณ์ (Linear Regression)")
@@ -1076,7 +1102,7 @@ elif model_choice == "Linear Regression":
                                     st.markdown("---")  # Separator
 
                                     # เตรียมข้อมูลสำหรับการคำนวณค่าความแม่นยำ
-                                    if delete_data_option_lr and merged_training_data_lr_before_deletion is not None:
+                                    if forecast_type_lr == "เติมข้อมูลที่ลบ" and delete_data_option_lr and merged_training_data_lr_before_deletion is not None:
                                         # Extract the actual deleted data
                                         deleted_data_actual_lr = merged_training_data_lr_before_deletion[
                                             (merged_training_data_lr_before_deletion['datetime'] >= delete_start_datetime_lr) & 
@@ -1120,12 +1146,57 @@ elif model_choice == "Linear Regression":
                                         else:
                                             st.error("ไม่สามารถคำนวณค่าความแม่นยำได้")
                                     else:
-                                        st.header("ผลค่าความแม่นยำ (LR)")
-                                        st.info("ไม่สามารถคำนวณความแม่นยำได้เนื่องจากไม่มีการลบข้อมูล")
+                                        # ถ้าเลือกพยากรณ์ไปข้างหน้า
+                                        if forecast_type_lr == "พยากรณ์ไปข้างหน้า":
+                                            # เตรียมข้อมูลสำหรับการคำนวณค่าความแม่นยำ (ถ้ามีข้อมูลจริง)
+                                            filled_lr = forecasted_data_lr.reset_index().rename(columns={'index': 'datetime'})
+                                            filled_lr['wl_up2'] = filled_lr['wl_up']
+                                            filled_lr.drop(columns=['wl_up'], inplace=True)
+
+                                            # Merge with actual data
+                                            actual_forecast_lr = target_df_lr[
+                                                (target_df_lr['datetime'] >= forecast_start_date_actual_lr) & 
+                                                (target_df_lr['datetime'] <= forecast_end_date_actual_lr)
+                                            ].copy()
+
+                                            if not actual_forecast_lr.empty:
+                                                merged_data_lr = pd.merge(actual_forecast_lr, filled_lr, on='datetime', how='left')
+                                                merged_data_lr = merged_data_lr.dropna(subset=['wl_up', 'wl_up2'])
+
+                                                mse_lr, mae_lr, r2_lr, _ = calculate_accuracy_metrics_linear(
+                                                    original=actual_forecast_lr,
+                                                    filled=filled_lr
+                                                )
+
+                                                if mse_lr is not None:
+                                                    st.header("ตารางข้อมูลเปรียบเทียบ (LR)")
+                                                    comparison_table_lr = create_comparison_table_streamlit(
+                                                        forecasted_data_lr, 
+                                                        merged_data_lr
+                                                    )
+                                                    st.dataframe(comparison_table_lr, use_container_width=True)
+                                                    
+                                                    st.header("ผลค่าความแม่นยำ (LR)")
+                                                    st.markdown("---")  # Separator
+                                                    col1, col2, col3 = st.columns(3)
+                                                    with col1:
+                                                        st.metric(label="Mean Squared Error (MSE)", value=f"{mse_lr:.4f}")
+                                                    with col2:
+                                                        st.metric(label="Mean Absolute Error (MAE)", value=f"{mae_lr:.4f}")
+                                                    with col3:
+                                                        st.metric(label="R-squared (R²)", value=f"{r2_lr:.4f}")
+                                                else:
+                                                    st.error("ไม่สามารถคำนวณค่าความแม่นยำได้")
+                                            else:
+                                                st.warning("ไม่มีข้อมูลจริงสำหรับการเปรียบเทียบค่าพยากรณ์")
+                                        else:
+                                            st.header("ผลค่าความแม่นยำ (LR)")
+                                            st.info("ไม่สามารถคำนวณความแม่นยำได้เนื่องจากไม่มีการลบข้อมูล")
                                 else:
                                     st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
         else:
             st.error("กรุณาอัปโหลดไฟล์สำหรับ Linear Regression")
+
 
 
 
