@@ -286,8 +286,6 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
                     st.warning(f"ไม่สามารถพยากรณ์ค่าในแถว {idx} ได้: {e}")
                     continue
 
-    data_filled['wl_up2'] = data_filled['wl_up']
-
     data_filled.drop(columns=['missing_group'], inplace=True)
 
     data_filled.reset_index(drop=True, inplace=True)
@@ -531,16 +529,6 @@ def merge_data(df1, df2=None, df3=None):
         merged_df = pd.merge(merged_df, df3[['datetime', 'wl_up']], on='datetime', how='left', suffixes=('', '_downstream'))
     return merged_df
 
-def merge_data_linear(df1, df2=None, df3=None):
-    merged_df = df1.copy()
-    if df2 is not None:
-        df2 = df2.rename(columns={'wl_up': 'wl_up_upstream'})
-        merged_df = pd.merge(merged_df, df2[['datetime', 'wl_up_upstream']], on='datetime', how='left')
-    if df3 is not None:
-        df3 = df3.rename(columns={'wl_up': 'wl_up_downstream'})
-        merged_df = pd.merge(merged_df, df3[['datetime', 'wl_up_downstream']], on='datetime', how='left')
-    return merged_df
-
 def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_days, upstream_data=None, downstream_data=None, delay_hours_up=0, delay_hours_down=0):
     if forecast_days < 1 or forecast_days > 30:
         st.error("สามารถพยากรณ์ได้ตั้งแต่ 1 ถึง 30 วัน")
@@ -554,6 +542,7 @@ def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_da
     if downstream_data is not None:
         feature_cols += [f'lag_{lag}_downstream' for lag in lags]
 
+    # การตั้งค่า upstream และ downstream
     if upstream_data is not None and not upstream_data.empty:
         upstream_data = upstream_data.copy()
         if delay_hours_up > 0:
@@ -637,6 +626,11 @@ def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_da
 
     forecasted_data.reset_index(inplace=True)
     forecasted_data = forecasted_data.rename(columns={'index': 'datetime'})  # แก้ไขชื่อคอลัมน์
+
+    # ตรวจสอบว่ามีข้อมูลพยากรณ์
+    if forecasted_data['wl_up'].isna().all():
+        st.error("ไม่มีค่าที่พยากรณ์ถูกสร้างขึ้น กรุณาตรวจสอบข้อมูลและการตั้งค่า")
+        return pd.DataFrame()
 
     return forecasted_data
 
@@ -964,7 +958,7 @@ elif model_choice == "Linear Regression":
                         st.stop()
 
                     df_lr_clean.reset_index(inplace=True)
-                    forecasted_data_lr['wl_up2'] = forecasted_data_lr['wl_up']
+                    # ไม่ต้องเพิ่ม 'wl_up2' ให้กับ forecasted_data_lr เพราะจะใช้ชื่อ 'ค่าที่พยากรณ์' แทน
                     df_lr_clean['datetime'] = pd.to_datetime(df_lr_clean['datetime'])
 
                     # เติมคอลัมน์ 'code'
@@ -978,6 +972,7 @@ elif model_choice == "Linear Regression":
     st.markdown("---")
 else:
     st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วยโมเดลที่เลือก")
+
 
 
 
