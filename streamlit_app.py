@@ -71,29 +71,53 @@ def create_time_features(data_clean):
 
     return data_clean
 
-def prepare_features(data_clean):
-    # สร้างฟีเจอร์เวลา
-    data_clean = create_time_features(data_clean)
-    
+def create_lag_lead_features(data, lags=[1, 4, 96, 192], leads=[1, 4, 96, 192]):
+    for lag in lags:
+        data[f'lag_{lag}'] = data['wl_up'].shift(lag)
+    for lead in leads:
+        data[f'lead_{lead}'] = data['wl_up'].shift(-lead)
+    return data
+
+def create_moving_average_features(data, window=672):
+    data[f'ma_{window}'] = data['wl_up'].rolling(window=window, min_periods=1).mean()
+    return data
+
+def prepare_features(data_clean, lags=[1, 4, 96, 192], leads=[1, 4, 96, 192], window=672):
     feature_cols = [
         'year', 'month', 'day', 'hour', 'minute',
         'day_of_week', 'day_of_year', 'week_of_year',
-        'days_in_month'
+        'days_in_month', 'wl_up_prev'
     ]
     
-    # ลบแถวที่มีค่า NaN ในฟีเจอร์เวลา
+    # สร้างฟีเจอร์ lag และ lead
+    data_clean = create_lag_lead_features(data_clean, lags, leads)
+    
+    # สร้างฟีเจอร์ค่าเฉลี่ยเคลื่อนที่
+    data_clean = create_moving_average_features(data_clean, window)
+    
+    # เพิ่มฟีเจอร์ lag และ lead เข้าไปใน feature_cols
+    lag_cols = [f'lag_{lag}' for lag in lags]
+    lead_cols = [f'lead_{lead}' for lead in leads]
+    ma_col = f'ma_{window}'
+    feature_cols.extend(lag_cols + lead_cols)
+    feature_cols.append(ma_col)
+    
+    # ลบแถวที่มีค่า NaN ในฟีเจอร์ lag และ lead
     data_clean = data_clean.dropna(subset=feature_cols)
     
-    X = data_clean[feature_cols]
+    X = data_clean[feature_cols[9:]]
     y = data_clean['wl_up']
     return X, y
 
 def train_and_evaluate_model(X, y, model_type='random_forest'):
-    # ฝึกโมเดลด้วยข้อมูลทั้งหมดที่มี
+    # แบ่งข้อมูลเป็นชุดฝึกและชุดทดสอบ
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # ฝึกโมเดลด้วยชุดฝึก
     if model_type == 'random_forest':
-        model = train_random_forest(X, y)
+        model = train_random_forest(X_train, y_train)
     elif model_type == 'linear_regression':
-        model = train_linear_regression_model(X, y)
+        model = train_linear_regression_model(X_train, y_train)
     else:
         st.error("โมเดลที่เลือกไม่ถูกต้อง")
         return None
@@ -177,53 +201,145 @@ def handle_initial_missing_values(data, initial_days=2, freq='15T'):
                 data.at[i, 'wl_up'] = data['wl_up'].iloc[i-1]
     return data
 
-def handle_missing_values_by_week(data_clean, training_data, model_type='random_forest'):
-    # เตรียมข้อมูลสำหรับการฝึกโมเดล
-    X_train, y_train = prepare_features(training_data)
+def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='random_forest'):
+    feature_cols = [
+        'wl_up_prev',
+        'lag_1', 'lag_4', 'lag_96', 'lag_192',
+        'lead_1', 'lead_4', 'lead_96', 'lead_192',
+        'ma_672'
+    ]
 
-    # ฝึกโมเดล
+    # เติมค่าที่ขาดหายไปในช่วงเริ่มต้น
+    initial_periods = 2 * 24 * (60 // 15)  # initial_days=2
+    initial_indices = data_clean.index[:initial_periods]
+    filled_initial = data_clean.loc[initial_indices, 'wl_up'].isna()
+
+    data_clean = handle_initial_missing_values(data_clean, initial_days=2)
+
+    # ตั้งค่า wl_forecast และ timestamp สำหรับค่าที่เติมในช่วงเริ่มต้น
+    data_clean.loc[initial_indices[filled_initial], 'wl_forecast'] = data_clean.loc[initial_indices[filled_initial], 'wl_up']
+    data_clean.loc[initial_indices[filled_initial], 'timestamp'] = pd.Timestamp.now()
+
+    data = data_clean.copy()
+
+    # Convert start_date and end_date to datetime
+    start_date = pd.to_datetime(start_date)
+    end_date = pd.to_datetime(end_date)
+
+    # Filter data based on the datetime range
+    data = data[(data['datetime'] >= start_date) & (data['datetime'] <= end_date)]
+
+    # ตรวจสอบว่ามีข้อมูลในช่วงที่เลือกหรือไม่
+    if data.empty:
+        st.error("ไม่มีข้อมูลในช่วงวันที่ที่เลือก กรุณาเลือกช่วงวันที่ที่มีข้อมูล")
+        st.stop()
+
+    # Generate all missing dates within the selected range
+    data_with_all_dates = generate_missing_dates(data)
+    data_with_all_dates.index = pd.to_datetime(data_with_all_dates['datetime'])
+
+    # เติมค่า missing ใน wl_up_prev
+    if 'wl_up_prev' in data_with_all_dates.columns:
+        data_with_all_dates['wl_up_prev'] = data_with_all_dates['wl_up_prev'].interpolate(method='linear')
+    else:
+        data_with_all_dates['wl_up_prev'] = data_with_all_dates['wl_up'].shift(1).interpolate(method='linear')
+
+    # สร้างฟีเจอร์ lag และ lead รวมถึงค่าเฉลี่ยเคลื่อนที่
+    data_with_all_dates = create_lag_lead_features(data_with_all_dates, lags=[1, 4, 96, 192], leads=[1, 4, 96, 192])
+    data_with_all_dates = create_moving_average_features(data_with_all_dates, window=672)
+
+    # เติมค่า missing ในฟีเจอร์ lag และ lead
+    lag_cols = ['lag_1', 'lag_4', 'lag_96', 'lag_192']
+    lead_cols = ['lead_1', 'lead_4', 'lead_96', 'lead_192']
+    ma_col = 'ma_672'
+    data_with_all_dates[lag_cols + lead_cols] = data_with_all_dates[lag_cols + lead_cols].interpolate(method='linear')
+    data_with_all_dates[ma_col] = data_with_all_dates[ma_col].interpolate(method='linear')
+
+    # แบ่งข้อมูลเป็นช่วงที่ขาดหายไปและไม่ขาดหายไป
+    data_missing = data_with_all_dates[data_with_all_dates['wl_up'].isnull()]
+    data_not_missing = data_with_all_dates.dropna(subset=['wl_up'])
+
+    if len(data_missing) == 0:
+        st.write("ไม่มีค่าที่ขาดหายไปสำหรับการพยากรณ์")
+        return data_with_all_dates
+
+    # สร้าง DataFrame เพื่อเก็บผลลัพธ์
+    data_filled = data_with_all_dates.copy()
+
+    # ค้นหากลุ่มของค่าที่ขาดหายไป
+    data_filled['missing_group'] = (data_filled['wl_up'].notnull() != data_filled['wl_up'].notnull().shift()).cumsum()
+    missing_groups = data_filled[data_filled['wl_up'].isnull()].groupby('missing_group')
+
+    # เตรียมโมเดล Random Forest หนึ่งครั้งก่อนวนลูป
+    X_train, y_train = prepare_features(data_not_missing)
+
+    # หา number of decimal places
+    decimal_places = get_decimal_places(data_clean['wl_up'])
+
+    # **ใช้ข้อมูลจากสัปดาห์ก่อนหน้าและสัปดาห์ถัดไป** ถ้าข้อมูลในสัปดาห์ปัจจุบันไม่เพียงพอ
+    if len(data_not_missing) < 192:
+        # ดึงข้อมูลสัปดาห์ก่อนหน้า
+        week_prev = data_clean[
+            (data_clean['datetime'] < start_date) & 
+            (data_clean['datetime'] >= start_date - pd.Timedelta(weeks=1))
+        ]
+        
+        # ดึงข้อมูลสัปดาห์ถัดไป
+        week_next = data_clean[
+            (data_clean['datetime'] > end_date) & 
+            (data_clean['datetime'] <= end_date + pd.Timedelta(weeks=1))
+        ]
+
+        # รวมข้อมูลจากสัปดาห์ก่อนหน้าและสัปดาห์ถัดไป
+        data_not_missing = pd.concat([data_not_missing, week_prev, week_next])
+        
+        # สร้างฟีเจอร์ใหม่สำหรับการฝึกโมเดล
+        X_train, y_train = prepare_features(data_not_missing)
+
     model = train_and_evaluate_model(X_train, y_train, model_type=model_type)
 
     # ตรวจสอบว่ามีโมเดลที่ถูกฝึกหรือไม่
     if model is None:
         st.error("ไม่สามารถสร้างโมเดลได้ กรุณาตรวจสอบข้อมูล")
-        return data_clean
+        return data_with_all_dates
 
-    # หา number of decimal places
-    decimal_places = get_decimal_places(data_clean['wl_up'])
+    for group_name, group_data in missing_groups:
+        missing_length = len(group_data)
+        idx_start = group_data.index[0]
+        idx_end = group_data.index[-1]
 
-    data_filled = data_clean.copy()
-    data_filled.set_index('datetime', inplace=True)
-    data_filled.sort_index(inplace=True)
+        if missing_length <= 3:
+            # เติมค่าด้วย interpolation ถ้าขาดหายไปไม่เกิน 3 แถว
+            data_filled.loc[idx_start:idx_end, 'wl_up'] = np.nan  # ยืนยันว่าค่าที่หายไปเป็น NaN
+            data_filled['wl_up'] = data_filled['wl_up'].interpolate(method='linear')
+            # ปัดเศษค่าที่เติม
+            data_filled.loc[idx_start:idx_end, 'wl_up'] = data_filled.loc[idx_start:idx_end, 'wl_up'].round(decimal_places)
+            # อัปเดตคอลัมน์ wl_forecast และ timestamp
+            data_filled.loc[idx_start:idx_end, 'wl_forecast'] = data_filled.loc[idx_start:idx_end, 'wl_up']
+            data_filled.loc[idx_start:idx_end, 'timestamp'] = pd.Timestamp.now()
+        else:
+            # ใช้ Random Forest ในการเติมค่าที่ขาดหายไป
+            for idx in group_data.index:
+                X_missing = data_filled.loc[idx, feature_cols].values.reshape(1, -1)
+                try:
+                    predicted_value = model.predict(X_missing)[0]
+                    # ปัดเศษค่าที่พยากรณ์
+                    predicted_value = round(predicted_value, decimal_places)
+                    # บันทึกค่าที่เติมในคอลัมน์ wl_up และ wl_forecast
+                    data_filled.at[idx, 'wl_forecast'] = predicted_value
+                    data_filled.at[idx, 'wl_up'] = predicted_value
+                    data_filled.at[idx, 'timestamp'] = pd.Timestamp.now()
+                except Exception as e:
+                    st.warning(f"ไม่สามารถพยากรณ์ค่าในแถว {idx} ได้: {e}")
+                    continue
 
-    # สร้างฟีเจอร์เวลา
-    data_filled = create_time_features(data_filled)
+    # สร้างคอลัมน์ wl_up2 ที่รวมข้อมูลเดิมกับค่าที่เติม
+    data_filled['wl_up2'] = data_filled['wl_up']
 
-    # หาค่า missing
-    missing_indices = data_filled[data_filled['wl_up'].isnull()].index
+    # ลบคอลัมน์ที่ไม่จำเป็น
+    data_filled.drop(columns=['missing_group'], inplace=True)
 
-    # พยากรณ์ทีละค่า
-    for idx in missing_indices:
-        feature_row = data_filled.loc[[idx]].copy()
-        X_missing, _ = prepare_features(feature_row)
-
-        # ตรวจสอบว่ามีฟีเจอร์ที่จำเป็นหรือไม่
-        if X_missing.isnull().any().any():
-            st.warning(f"ไม่สามารถพยากรณ์ค่าในเวลา {idx} ได้เนื่องจากข้อมูลฟีเจอร์ไม่ครบ")
-            continue
-
-        try:
-            predicted_value = model.predict(X_missing)[0]
-            # ปัดเศษค่าที่พยากรณ์
-            predicted_value = round(predicted_value, decimal_places)
-            data_filled.at[idx, 'wl_up'] = predicted_value
-            data_filled.at[idx, 'wl_forecast'] = predicted_value
-            data_filled.at[idx, 'timestamp'] = pd.Timestamp.now()
-        except Exception as e:
-            st.warning(f"ไม่สามารถพยากรณ์ค่าในเวลา {idx} ได้: {e}")
-            continue
-
-    data_filled.reset_index(inplace=True)
+    data_filled.reset_index(drop=True, inplace=True)
     return data_filled
 
 def delete_data_by_date_range(data, delete_start_date, delete_end_date):
@@ -714,15 +830,9 @@ with st.sidebar:
 
         # เลือกช่วงวันที่ใน sidebar
         with st.sidebar.expander("เลือกช่วงข้อมูลสำหรับฝึกโมเดล", expanded=False):
-            training_start_date_rf = st.date_input("วันที่เริ่มต้นฝึกโมเดล", value=pd.to_datetime("2024-05-01"), key='training_start_rf')
-            training_start_time_rf = st.time_input("เวลาเริ่มต้นฝึกโมเดล", value=pd.Timestamp("00:00:00").time(), key='training_start_time_rf')
-            training_end_date_rf = st.date_input("วันที่สิ้นสุดฝึกโมเดล", value=pd.to_datetime("2024-05-31"), key='training_end_rf')
-            training_end_time_rf = st.time_input("เวลาสิ้นสุดฝึกโมเดล", value=pd.Timestamp("23:45:00").time(), key='training_end_time_rf')
-
-            # กำหนดช่วงเวลาที่ต้องการเติมค่าที่ขาดหาย
-            start_date = st.date_input("วันที่เริ่มต้นเติมค่า", value=pd.to_datetime("2024-06-01"), key='start_date_rf')
-            end_date = st.date_input("วันที่สิ้นสุดเติมค่า", value=pd.to_datetime("2024-06-30"), key='end_date_rf')
-
+            start_date = st.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2024-08-01"))
+            end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2024-08-31")) + pd.DateOffset(hours=23, minutes=45)
+            
             # เพิ่มตัวเลือกว่าจะลบข้อมูลหรือไม่
             delete_data_option = st.checkbox("ต้องการเลือกลบข้อมูล", value=False)
 
@@ -916,23 +1026,13 @@ if model_choice == "Random Forest":
                     # Create time features
                     df_clean = create_time_features(df_clean)
 
-                    # เตรียมข้อมูลสำหรับการฝึกโมเดล
-                    training_start_datetime_rf = pd.Timestamp.combine(training_start_date_rf, training_start_time_rf)
-                    training_end_datetime_rf = pd.Timestamp.combine(training_end_date_rf, training_end_time_rf)
+                    # เติมค่า missing ใน 'wl_up_prev'
+                    if 'wl_up_prev' not in df_clean.columns:
+                        df_clean['wl_up_prev'] = df_clean['wl_up'].shift(1)
+                    df_clean['wl_up_prev'] = df_clean['wl_up_prev'].interpolate(method='linear')
 
-                    training_data_rf = df_clean[
-                        (df_clean['datetime'] >= training_start_datetime_rf) & 
-                        (df_clean['datetime'] <= training_end_datetime_rf)
-                    ].copy()
-
-                    # ตรวจสอบว่ามีข้อมูลเพียงพอสำหรับการฝึกโมเดลหรือไม่
-                    if training_data_rf.empty:
-                        st.error("ไม่มีข้อมูลเพียงพอสำหรับการฝึกโมเดลในช่วงวันที่ที่เลือก")
-                        processing_placeholder.empty()
-                        st.stop()
-
-                    # Handle missing values
-                    df_handled = handle_missing_values_by_week(df_clean, training_data_rf, model_type='random_forest')
+                    # Handle missing values by week
+                    df_handled = handle_missing_values_by_week(df_clean, start_date, end_date, model_type='random_forest')
 
                     # Remove the processing message after the processing is complete
                     processing_placeholder.empty()
