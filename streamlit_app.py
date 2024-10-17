@@ -107,90 +107,287 @@ def prepare_features(data_clean, lags=[1, 4, 96, 192], leads=[1, 4, 96, 192], wi
     y = data_clean['wl_up']
     return X, y
 
-# ฟังก์ชันสำหรับฝึกโมเดล
-def train_and_evaluate_model(X, y, model_type='random_forest'):
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    if model_type == 'random_forest':
-        model = train_random_forest(X_train, y_train)
-    elif model_type == 'linear_regression':
-        model = train_linear_regression_model(X_train, y_train)
-    else:
-        st.error("โมเดลที่เลือกไม่ถูกต้อง")
-        return None
-
-    if model is None:
-        st.error("การฝึกโมเดลล้มเหลว")
-        return None
-    return model
-
-def train_random_forest(X_train, y_train):
-    param_distributions = {
-        'n_estimators': [200, 300, 400, 500, 600],
-        'max_depth': [None, 10, 20, 30, 40],
-        'min_samples_split': [2, 5, 10],
-        'min_samples_leaf': [1, 2, 4],
-        'max_features': ['auto', 'sqrt', 'log2'],
-        'bootstrap': [True, False]
-    }
-
-    rf = RandomForestRegressor(random_state=42)
-
-    tscv = TimeSeriesSplit(n_splits=5)
-    random_search = RandomizedSearchCV(
-        estimator=rf,
-        param_distributions=param_distributions,
-        n_iter=30,
-        cv=tscv,
-        n_jobs=-1,
-        verbose=2,
-        random_state=42,
-        scoring='neg_mean_absolute_error'
-    )
-    random_search.fit(X_train, y_train)
-
-    return random_search.best_estimator_
-
+# ฟังก์ชันสำหรับฝึกโมเดล Linear Regression
 def train_linear_regression_model(X_train, y_train):
     model = LinearRegression()
     model.fit(X_train, y_train)
     return model
 
-# ฟังก์ชันเพิ่มเติม
-def generate_missing_dates(data):
-    if data['datetime'].isnull().all():
-        st.error("ไม่มีข้อมูลวันที่ในข้อมูลที่ให้มา")
-        st.stop()
-    full_date_range = pd.date_range(start=data['datetime'].min(), end=data['datetime'].max(), freq='15T')
-    all_dates = pd.DataFrame(full_date_range, columns=['datetime'])
-    data_with_all_dates = pd.merge(all_dates, data, on='datetime', how='left')
-    return data_with_all_dates
+# ฟังก์ชันสำหรับพยากรณ์ด้วย Linear Regression
+def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_days, upstream_data=None, downstream_data=None, delay_hours_up=0, delay_hours_down=0):
+    if forecast_days < 1 or forecast_days > 30:
+        st.error("สามารถพยากรณ์ได้ตั้งแต่ 1 ถึง 30 วัน")
+        return pd.DataFrame()
 
-def fill_code_column(data):
-    if 'code' in data.columns:
-        data['code'] = data['code'].fillna(method='ffill').fillna(method='bfill')
+    lags = [1, 4, 96, 192]
+
+    feature_cols = [f'lag_{lag}' for lag in lags]
+    if upstream_data is not None:
+        feature_cols += [f'lag_{lag}_upstream' for lag in lags]
+    if downstream_data is not None:
+        feature_cols += [f'lag_{lag}_downstream' for lag in lags]
+
+    # การตั้งค่า upstream และ downstream
+    if upstream_data is not None and not upstream_data.empty:
+        upstream_data = upstream_data.copy()
+        if delay_hours_up > 0:
+            upstream_data['datetime'] = upstream_data['datetime'] + pd.Timedelta(hours=delay_hours_up)
+        upstream_data.set_index('datetime', inplace=True)
     else:
-        data['code'] = 'Unknown'  # หรือกำหนดค่าเริ่มต้นตามที่ต้องการ
-    return data
+        upstream_data = None
 
-def get_decimal_places(series):
-    series_non_null = series.dropna().astype(str)
-    decimal_counts = series_non_null.apply(lambda x: len(x.split('.')[-1]) if '.' in x else 0)
-    if not decimal_counts.empty:
-        return decimal_counts.mode()[0]
+    if downstream_data is not None and not downstream_data.empty:
+        downstream_data = downstream_data.copy()
+        if delay_hours_down > 0:
+            downstream_data['datetime'] = downstream_data['datetime'] - pd.Timedelta(hours=delay_hours_down)
+        downstream_data.set_index('datetime', inplace=True)
     else:
-        return 2
+        downstream_data = None
 
-def handle_initial_missing_values(data, initial_days=2, freq='15T'):
-    initial_periods = initial_days * 24 * (60 // 15)
-    for i in range(initial_periods):
-        if pd.isna(data['wl_up'].iloc[i]):
-            if i == 0:
-                data.at[i, 'wl_up'] = data['wl_up'].mean()
+    training_data = data.copy()
+    if upstream_data is not None:
+        training_data = training_data.join(upstream_data[['wl_up']], on='datetime', rsuffix='_upstream')
+    if downstream_data is not None:
+        training_data = training_data.join(downstream_data[['wl_up']], on='datetime', rsuffix='_downstream')
+
+    for lag in lags:
+        training_data[f'lag_{lag}'] = training_data['wl_up'].shift(lag)
+        if upstream_data is not None:
+            training_data[f'lag_{lag}_upstream'] = training_data['wl_up_upstream'].shift(lag)
+        if downstream_data is not None:
+            training_data[f'lag_{lag}_downstream'] = training_data['wl_up_downstream'].shift(lag)
+
+    training_data.fillna(method='ffill', inplace=True)
+    training_data.dropna(inplace=True)
+
+    X_train = training_data[feature_cols]
+    y_train = training_data['wl_up']
+
+    model = train_linear_regression_model(X_train, y_train)
+
+    forecast_periods = forecast_days * 96  # 96 intervals per day (15-minute intervals)
+    forecast_index = pd.date_range(start=forecast_start_date, periods=forecast_periods, freq='15T')
+    forecasted_data = pd.DataFrame(index=forecast_index, columns=['wl_up'])
+
+    combined_data = data.copy()
+    combined_data.set_index('datetime', inplace=True)
+    if upstream_data is not None:
+        combined_upstream = upstream_data.copy()
+    else:
+        combined_upstream = None
+    if downstream_data is not None:
+        combined_downstream = downstream_data.copy()
+    else:
+        combined_downstream = None
+
+    for idx in forecasted_data.index:
+        lag_features = {}
+        for lag in lags:
+            lag_time = idx - pd.Timedelta(minutes=15 * lag)
+            if lag_time in combined_data.index and not pd.isnull(combined_data.at[lag_time, 'wl_up']):
+                lag_features[f'lag_{lag}'] = combined_data.at[lag_time, 'wl_up']
             else:
-                data.at[i, 'wl_up'] = data['wl_up'].iloc[i-1]
-    return data
+                lag_features[f'lag_{lag}'] = y_train.mean()
+            if upstream_data is not None:
+                if lag_time in combined_upstream.index and not pd.isnull(combined_upstream.at[lag_time, 'wl_up']):
+                    lag_features[f'lag_{lag}_upstream'] = combined_upstream.at[lag_time, 'wl_up']
+                else:
+                    lag_features[f'lag_{lag}_upstream'] = y_train.mean()
+            if downstream_data is not None:
+                if lag_time in combined_downstream.index and not pd.isnull(combined_downstream.at[lag_time, 'wl_up']):
+                    lag_features[f'lag_{lag}_downstream'] = combined_downstream.at[lag_time, 'wl_up']
+                else:
+                    lag_features[f'lag_{lag}_downstream'] = y_train.mean()
 
+        X_pred = pd.DataFrame([lag_features], columns=feature_cols)
+
+        try:
+            forecast_value = model.predict(X_pred)[0]
+            forecast_value = np.clip(forecast_value, combined_data['wl_up'].min(), combined_data['wl_up'].max())
+            forecasted_data.at[idx, 'wl_up'] = forecast_value
+            combined_data.at[idx, 'wl_up'] = forecast_value
+        except Exception as e:
+            st.warning(f"ไม่สามารถพยากรณ์ค่าในเวลา {idx} ได้: {e}")
+
+    # สร้างคอลัมน์ 'datetime' จาก index
+    forecasted_data.reset_index(inplace=True)
+    forecasted_data = forecasted_data.rename(columns={'index': 'datetime'})
+    forecasted_data['datetime'] = forecasted_data['index']
+    forecasted_data.drop(columns=['index'], inplace=True)
+    forecasted_data['datetime'] = pd.to_datetime(forecasted_data['datetime'])
+
+    # สร้างคอลัมน์ 'ค่าที่พยากรณ์'
+    if 'wl_up' in forecasted_data.columns:
+        forecasted_data = forecasted_data.rename(columns={'wl_up': 'ค่าที่พยากรณ์'})
+    else:
+        st.error("ไม่พบคอลัมน์ 'wl_up' ใน forecasted_data หลังการพยากรณ์")
+        st.write("forecasted_data.columns:", forecasted_data.columns)
+        return pd.DataFrame()
+
+    # ตรวจสอบว่ามีข้อมูลพยากรณ์
+    if forecasted_data['ค่าที่พยากรณ์'].isna().all():
+        st.error("ไม่มีค่าที่พยากรณ์ถูกสร้างขึ้น กรุณาตรวจสอบข้อมูลและการตั้งค่า")
+        return pd.DataFrame()
+
+    # เพิ่มการแสดงข้อมูลสำหรับดีบัก
+    st.write("Preview of forecasted_data:")
+    st.write(forecasted_data.head())
+
+    return forecasted_data
+
+# ฟังก์ชันสำหรับพล็อตผลลัพธ์ของ Linear Regression
+def plot_results_linear(data_before, forecasted_data, training_end_datetime_lr):
+    # ตรวจสอบว่า 'datetime' มีอยู่ในทั้งสอง DataFrame
+    if 'datetime' not in data_before.columns or 'datetime' not in forecasted_data.columns:
+        st.error("DataFrame ไม่มีคอลัมน์ 'datetime'")
+        st.write("data_before.columns:", data_before.columns)
+        st.write("forecasted_data.columns:", forecasted_data.columns)
+        return
+
+    # รวมข้อมูลจริงก่อนช่วงการพยากรณ์และข้อมูลที่พยากรณ์
+    data_before = data_before.copy()
+    data_before = data_before[data_before['datetime'] <= training_end_datetime_lr]
+    data_before = data_before.rename(columns={'wl_up': 'ข้อมูลเดิม'})
+
+    forecasted_data = forecasted_data.copy()
+
+    # ตรวจสอบว่าฟอร์กาสต์ถูกสร้างขึ้นถูกต้อง
+    if 'ค่าที่พยากรณ์' not in forecasted_data.columns:
+        st.error("forecasted_data ไม่มีคอลัมน์ 'ค่าที่พยากรณ์'")
+        st.write("forecasted_data.columns:", forecasted_data.columns)
+        return
+
+    combined_data = pd.merge(
+        data_before[['datetime', 'ข้อมูลเดิม']],
+        forecasted_data[['datetime', 'ค่าที่พยากรณ์']],
+        on='datetime',
+        how='outer'
+    )
+
+    # ตรวจสอบว่ามีคอลัมน์ที่ต้องการสำหรับการวาดกราฟ
+    required_columns = ['ข้อมูลเดิม', 'ค่าที่พยากรณ์']
+    missing_columns = [col for col in required_columns if col not in combined_data.columns]
+    if missing_columns:
+        st.error(f"ไม่มีคอลัมน์ {missing_columns} ใน combined_data")
+        st.write("combined_data.columns:", combined_data.columns)
+        return
+
+    # ตรวจสอบว่ามีข้อมูลเพียงพอสำหรับการพล็อต
+    if combined_data[['ข้อมูลเดิม', 'ค่าที่พยากรณ์']].dropna().empty:
+        st.error("ไม่มีข้อมูลเพียงพอสำหรับการวาดกราฟ (ไม่มีค่าที่ไม่เป็น NaN ใน 'ข้อมูลเดิม' และ 'ค่าที่พยากรณ์')")
+        st.write("combined_data[['ข้อมูลเดิม', 'ค่าที่พยากรณ์']].dropna():")
+        st.write(combined_data[['ข้อมูลเดิม', 'ค่าที่พยากรณ์']].dropna())
+        return
+
+    # เพิ่มการแสดงข้อมูลสำหรับดีบัก
+    st.write("Preview of combined_data:")
+    st.write(combined_data.head())
+
+    # วาดกราฟ
+    fig = px.line(
+        combined_data,
+        x='datetime',
+        y=['ข้อมูลเดิม', 'ค่าที่พยากรณ์'],
+        labels={'value': 'ระดับน้ำ (wl_up)', 'variable': 'ประเภทข้อมูล'},
+        title='การพยากรณ์ระดับน้ำด้วย Linear Regression',
+        color_discrete_map={
+            "ข้อมูลเดิม": "#ef553b",
+            "ค่าที่พยากรณ์": "#636efa"
+        }
+    )
+
+    fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
+
+    st.header("ผลการพยากรณ์ด้วย Linear Regression", divider='gray')
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.header("ตารางค่าที่พยากรณ์", divider='gray')
+    st.dataframe(forecasted_data[['datetime', 'ค่าที่พยากรณ์']], use_container_width=True)
+
+    # คำนวณค่าความแม่นยำถ้ามีข้อมูลจริง
+    actual_data = data_before.copy()
+    actual_data = actual_data[data_before['datetime'] > training_end_datetime_lr]
+
+    merged_data = pd.merge(
+        actual_data[['datetime', 'ข้อมูลเดิม']],
+        forecasted_data[['datetime', 'ค่าที่พยากรณ์']],
+        on='datetime',
+        how='inner'
+    )
+
+    if not merged_data.empty:
+        mse = mean_squared_error(merged_data['ข้อมูลเดิม'], merged_data['ค่าที่พยากรณ์'])
+        mae = mean_absolute_error(merged_data['ข้อมูลเดิม'], merged_data['ค่าที่พยากรณ์'])
+        r2 = r2_score(merged_data['ข้อมูลเดิม'], merged_data['ค่าที่พยากรณ์'])
+
+        st.header("ผลค่าความแม่นยำ", divider='gray')
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(label="Mean Squared Error (MSE)", value=f"{mse:.4f}")
+        with col2:
+            st.metric(label="Mean Absolute Error (MAE)", value=f"{mae:.4f}")
+        with col3:
+            st.metric(label="R-squared (R²)", value=f"{r2:.4f}")
+    else:
+        st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่าความแม่นยำได้")
+
+# ฟังก์ชันสำหรับพล็อตข้อมูลตัวอย่าง
+def plot_data_preview(df_pre, df2_pre, df3_pre, total_time_lag_upstream, total_time_lag_downstream):
+    data_pre1 = pd.DataFrame({
+        'datetime': df_pre['datetime'],
+        'สถานีที่ต้องการทำนาย': df_pre['wl_up']
+    })
+
+    combined_data_pre = data_pre1.copy()
+
+    if df2_pre is not None:
+        data_pre2 = pd.DataFrame({
+            'datetime': df2_pre['datetime'] + total_time_lag_upstream,
+            'สถานีน้ำ Upstream': df2_pre['wl_up']
+        })
+        combined_data_pre = pd.merge(combined_data_pre, data_pre2, on='datetime', how='outer')
+
+    if df3_pre is not None:
+        data_pre3 = pd.DataFrame({
+            'datetime': df3_pre['datetime'] - total_time_lag_downstream,
+            'สถานีน้ำ Downstream': df3_pre['wl_up']
+        })
+        combined_data_pre = pd.merge(combined_data_pre, data_pre3, on='datetime', how='outer')
+
+    y_columns = ['สถานีที่ต้องการทำนาย']
+    if 'สถานีน้ำ Upstream' in combined_data_pre.columns:
+        y_columns.append('สถานีน้ำ Upstream')
+    if 'สถานีน้ำ Downstream' in combined_data_pre.columns:
+        y_columns.append('สถานีน้ำ Downstream')
+
+    fig = px.line(
+        combined_data_pre,
+        x='datetime',
+        y=y_columns,
+        labels={'value': 'ระดับน้ำ (wl_up)', 'variable': 'ประเภทข้อมูล'},
+        title='ข้อมูลจากสถานีต่างๆ',
+        color_discrete_sequence=px.colors.qualitative.Plotly
+    )
+
+    fig.update_layout(
+        xaxis_title="วันที่",
+        yaxis_title="ระดับน้ำ (wl_up)"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+# ฟังก์ชันสำหรับรวมข้อมูลจากหลายสถานี
+def merge_data(df1, df2=None, df3=None):
+    if df2 is not None:
+        merged_df = pd.merge(df1, df2[['datetime', 'wl_up']], on='datetime', how='left', suffixes=('', '_upstream'))
+    else:
+        merged_df = df1.copy()
+
+    if df3 is not None:
+        merged_df = pd.merge(merged_df, df3[['datetime', 'wl_up']], on='datetime', how='left', suffixes=('', '_downstream'))
+    return merged_df
+
+# ฟังก์ชันสำหรับเติมค่าและจัดการข้อมูลขาดหาย
 def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='random_forest'):
     feature_cols = [
         'wl_up_prev',
@@ -219,7 +416,7 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
         st.stop()
 
     data_with_all_dates = generate_missing_dates(data)
-    data_with_all_dates.index = pd.to_datetime(data_with_all_dates['datetime'])
+    data_with_all_dates.set_index('datetime', inplace=True)
 
     if 'wl_up_prev' in data_with_all_dates.columns:
         data_with_all_dates['wl_up_prev'] = data_with_all_dates['wl_up_prev'].interpolate(method='linear')
@@ -288,8 +485,69 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
 
     data_filled.drop(columns=['missing_group'], inplace=True)
 
-    data_filled.reset_index(drop=True, inplace=True)
+    data_filled.reset_index(inplace=True)
     return data_filled
+
+def train_random_forest(X_train, y_train):
+    param_distributions = {
+        'n_estimators': [200, 300, 400, 500, 600],
+        'max_depth': [None, 10, 20, 30, 40],
+        'min_samples_split': [2, 5, 10],
+        'min_samples_leaf': [1, 2, 4],
+        'max_features': ['auto', 'sqrt', 'log2'],
+        'bootstrap': [True, False]
+    }
+
+    rf = RandomForestRegressor(random_state=42)
+
+    tscv = TimeSeriesSplit(n_splits=5)
+    random_search = RandomizedSearchCV(
+        estimator=rf,
+        param_distributions=param_distributions,
+        n_iter=30,
+        cv=tscv,
+        n_jobs=-1,
+        verbose=2,
+        random_state=42,
+        scoring='neg_mean_absolute_error'
+    )
+    random_search.fit(X_train, y_train)
+
+    return random_search.best_estimator_
+
+def generate_missing_dates(data):
+    if data['datetime'].isnull().all():
+        st.error("ไม่มีข้อมูลวันที่ในข้อมูลที่ให้มา")
+        st.stop()
+    full_date_range = pd.date_range(start=data['datetime'].min(), end=data['datetime'].max(), freq='15T')
+    all_dates = pd.DataFrame(full_date_range, columns=['datetime'])
+    data_with_all_dates = pd.merge(all_dates, data, on='datetime', how='left')
+    return data_with_all_dates
+
+def fill_code_column(data):
+    if 'code' in data.columns:
+        data['code'] = data['code'].fillna(method='ffill').fillna(method='bfill')
+    else:
+        data['code'] = 'Unknown'  # หรือกำหนดค่าเริ่มต้นตามที่ต้องการ
+    return data
+
+def get_decimal_places(series):
+    series_non_null = series.dropna().astype(str)
+    decimal_counts = series_non_null.apply(lambda x: len(x.split('.')[-1]) if '.' in x else 0)
+    if not decimal_counts.empty:
+        return decimal_counts.mode()[0]
+    else:
+        return 2
+
+def handle_initial_missing_values(data, initial_days=2, freq='15T'):
+    initial_periods = initial_days * 24 * (60 // 15)
+    for i in range(initial_periods):
+        if pd.isna(data['wl_up'].iloc[i]):
+            if i == 0:
+                data.at[i, 'wl_up'] = data['wl_up'].mean()
+            else:
+                data.at[i, 'wl_up'] = data['wl_up'].iloc[i-1]
+    return data
 
 def delete_data_by_date_range(data, delete_start_date, delete_end_date):
     delete_start_date = pd.to_datetime(delete_start_date)
@@ -404,6 +662,7 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
         st.header("ผลค่าความแม่นยำ", divider='gray')
         st.info("ไม่สามารถคำนวณความแม่นยำได้เนื่องจากไม่มีการลบข้อมูล")
 
+# ฟังก์ชันสำหรับพล็อตผลลัพธ์ของ Linear Regression
 def plot_results_linear(data_before, forecasted_data, training_end_datetime_lr):
     # ตรวจสอบว่า 'datetime' มีอยู่ในทั้งสอง DataFrame
     if 'datetime' not in data_before.columns or 'datetime' not in forecasted_data.columns:
@@ -418,24 +677,51 @@ def plot_results_linear(data_before, forecasted_data, training_end_datetime_lr):
     data_before = data_before.rename(columns={'wl_up': 'ข้อมูลเดิม'})
 
     forecasted_data = forecasted_data.copy()
-    forecasted_data = forecasted_data.rename(columns={'wl_up': 'ค่าที่พยากรณ์'})
 
-    combined_data = pd.merge(data_before[['datetime', 'ข้อมูลเดิม']], forecasted_data[['datetime', 'ค่าที่พยากรณ์']], on='datetime', how='outer')
-
-    # ตรวจสอบว่ามีคอลัมน์ที่ต้องการสำหรับการวาดกราฟ
-    if 'ข้อมูลเดิม' not in combined_data.columns or 'ค่าที่พยากรณ์' not in combined_data.columns:
-        st.error("ไม่มีคอลัมน์ 'ข้อมูลเดิม' หรือ 'ค่าที่พยากรณ์' ในข้อมูลที่รวม")
-        st.write(combined_data.columns)
+    # ตรวจสอบว่าฟอร์กาสต์ถูกสร้างขึ้นถูกต้อง
+    if 'ค่าที่พยากรณ์' not in forecasted_data.columns:
+        st.error("forecasted_data ไม่มีคอลัมน์ 'ค่าที่พยากรณ์'")
+        st.write("forecasted_data.columns:", forecasted_data.columns)
         return
 
+    combined_data = pd.merge(
+        data_before[['datetime', 'ข้อมูลเดิม']],
+        forecasted_data[['datetime', 'ค่าที่พยากรณ์']],
+        on='datetime',
+        how='outer'
+    )
+
+    # ตรวจสอบว่ามีคอลัมน์ที่ต้องการสำหรับการวาดกราฟ
+    required_columns = ['ข้อมูลเดิม', 'ค่าที่พยากรณ์']
+    missing_columns = [col for col in required_columns if col not in combined_data.columns]
+    if missing_columns:
+        st.error(f"ไม่มีคอลัมน์ {missing_columns} ใน combined_data")
+        st.write("combined_data.columns:", combined_data.columns)
+        return
+
+    # ตรวจสอบว่ามีข้อมูลเพียงพอสำหรับการพล็อต
+    if combined_data[['ข้อมูลเดิม', 'ค่าที่พยากรณ์']].dropna().empty:
+        st.error("ไม่มีข้อมูลเพียงพอสำหรับการวาดกราฟ (ไม่มีค่าที่ไม่เป็น NaN ใน 'ข้อมูลเดิม' และ 'ค่าที่พยากรณ์')")
+        st.write("combined_data[['ข้อมูลเดิม', 'ค่าที่พยากรณ์']].dropna():")
+        st.write(combined_data[['ข้อมูลเดิม', 'ค่าที่พยากรณ์']].dropna())
+        return
+
+    # เพิ่มการแสดงข้อมูลสำหรับดีบัก
+    st.write("Preview of combined_data:")
+    st.write(combined_data.head())
+
     # วาดกราฟ
-    fig = px.line(combined_data, x='datetime', y=['ข้อมูลเดิม', 'ค่าที่พยากรณ์'],
-                  labels={'value': 'ระดับน้ำ (wl_up)', 'variable': 'ประเภทข้อมูล'},
-                  title='การพยากรณ์ระดับน้ำด้วย Linear Regression',
-                  color_discrete_map={
-                      "ข้อมูลเดิม": "#ef553b",
-                      "ค่าที่พยากรณ์": "#636efa"
-                  })
+    fig = px.line(
+        combined_data,
+        x='datetime',
+        y=['ข้อมูลเดิม', 'ค่าที่พยากรณ์'],
+        labels={'value': 'ระดับน้ำ (wl_up)', 'variable': 'ประเภทข้อมูล'},
+        title='การพยากรณ์ระดับน้ำด้วย Linear Regression',
+        color_discrete_map={
+            "ข้อมูลเดิม": "#ef553b",
+            "ค่าที่พยากรณ์": "#636efa"
+        }
+    )
 
     fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
 
@@ -449,7 +735,12 @@ def plot_results_linear(data_before, forecasted_data, training_end_datetime_lr):
     actual_data = data_before.copy()
     actual_data = actual_data[data_before['datetime'] > training_end_datetime_lr]
 
-    merged_data = pd.merge(actual_data[['datetime', 'ข้อมูลเดิม']], forecasted_data[['datetime', 'ค่าที่พยากรณ์']], on='datetime', how='inner')
+    merged_data = pd.merge(
+        actual_data[['datetime', 'ข้อมูลเดิม']],
+        forecasted_data[['datetime', 'ค่าที่พยากรณ์']],
+        on='datetime',
+        how='inner'
+    )
 
     if not merged_data.empty:
         mse = mean_squared_error(merged_data['ข้อมูลเดิม'], merged_data['ค่าที่พยากรณ์'])
@@ -467,6 +758,7 @@ def plot_results_linear(data_before, forecasted_data, training_end_datetime_lr):
     else:
         st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่าความแม่นยำได้")
 
+# ฟังก์ชันเพิ่มเติม
 def plot_data_preview(df_pre, df2_pre, df3_pre, total_time_lag_upstream, total_time_lag_downstream):
     data_pre1 = pd.DataFrame({
         'datetime': df_pre['datetime'],
@@ -510,124 +802,6 @@ def plot_data_preview(df_pre, df2_pre, df3_pre, total_time_lag_upstream, total_t
     )
 
     st.plotly_chart(fig, use_container_width=True)
-
-def merge_data(df1, df2=None, df3=None):
-    if df2 is not None:
-        merged_df = pd.merge(df1, df2[['datetime', 'wl_up']], on='datetime', how='left', suffixes=('', '_upstream'))
-    else:
-        merged_df = df1.copy()
-
-    if df3 is not None:
-        merged_df = pd.merge(merged_df, df3[['datetime', 'wl_up']], on='datetime', how='left', suffixes=('', '_downstream'))
-    return merged_df
-
-def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_days, upstream_data=None, downstream_data=None, delay_hours_up=0, delay_hours_down=0):
-    if forecast_days < 1 or forecast_days > 30:
-        st.error("สามารถพยากรณ์ได้ตั้งแต่ 1 ถึง 30 วัน")
-        return pd.DataFrame()
-
-    lags = [1, 4, 96, 192]
-
-    feature_cols = [f'lag_{lag}' for lag in lags]
-    if upstream_data is not None:
-        feature_cols += [f'lag_{lag}_upstream' for lag in lags]
-    if downstream_data is not None:
-        feature_cols += [f'lag_{lag}_downstream' for lag in lags]
-
-    # การตั้งค่า upstream และ downstream
-    if upstream_data is not None and not upstream_data.empty:
-        upstream_data = upstream_data.copy()
-        if delay_hours_up > 0:
-            upstream_data['datetime'] = upstream_data['datetime'] + pd.Timedelta(hours=delay_hours_up)
-        upstream_data.set_index('datetime', inplace=True)
-    else:
-        upstream_data = None
-
-    if downstream_data is not None and not downstream_data.empty:
-        downstream_data = downstream_data.copy()
-        if delay_hours_down > 0:
-            downstream_data['datetime'] = downstream_data['datetime'] - pd.Timedelta(hours=delay_hours_down)
-        downstream_data.set_index('datetime', inplace=True)
-    else:
-        downstream_data = None
-
-    training_data = data.copy()
-    if upstream_data is not None:
-        training_data = training_data.join(upstream_data[['wl_up']], on='datetime', rsuffix='_upstream')
-    if downstream_data is not None:
-        training_data = training_data.join(downstream_data[['wl_up']], on='datetime', rsuffix='_downstream')
-
-    for lag in lags:
-        training_data[f'lag_{lag}'] = training_data['wl_up'].shift(lag)
-        if upstream_data is not None:
-            training_data[f'lag_{lag}_upstream'] = training_data['wl_up_upstream'].shift(lag)
-        if downstream_data is not None:
-            training_data[f'lag_{lag}_downstream'] = training_data['wl_up_downstream'].shift(lag)
-
-    training_data.fillna(method='ffill', inplace=True)
-    training_data.dropna(inplace=True)
-
-    X_train = training_data[feature_cols]
-    y_train = training_data['wl_up']
-
-    model = LinearRegression()
-    model.fit(X_train, y_train)
-
-    forecast_periods = forecast_days * 96  # 96 intervals per day (15-minute intervals)
-    forecast_index = pd.date_range(start=forecast_start_date, periods=forecast_periods, freq='15T')
-    forecasted_data = pd.DataFrame(index=forecast_index, columns=['wl_up'])
-
-    combined_data = data.copy()
-    if upstream_data is not None:
-        combined_upstream = upstream_data.copy()
-    else:
-        combined_upstream = None
-    if downstream_data is not None:
-        combined_downstream = downstream_data.copy()
-    else:
-        combined_downstream = None
-
-    for idx in forecasted_data.index:
-        lag_features = {}
-        for lag in lags:
-            lag_time = idx - pd.Timedelta(minutes=15 * lag)
-            if lag_time in combined_data.index and not pd.isnull(combined_data.at[lag_time, 'wl_up']):
-                lag_features[f'lag_{lag}'] = combined_data.at[lag_time, 'wl_up']
-            else:
-                lag_features[f'lag_{lag}'] = y_train.mean()
-            if upstream_data is not None:
-                if lag_time in combined_upstream.index and not pd.isnull(combined_upstream.at[lag_time, 'wl_up']):
-                    lag_features[f'lag_{lag}_upstream'] = combined_upstream.at[lag_time, 'wl_up']
-                else:
-                    lag_features[f'lag_{lag}_upstream'] = y_train.mean()
-            if downstream_data is not None:
-                if lag_time in combined_downstream.index and not pd.isnull(combined_downstream.at[lag_time, 'wl_up']):
-                    lag_features[f'lag_{lag}_downstream'] = combined_downstream.at[lag_time, 'wl_up']
-                else:
-                    lag_features[f'lag_{lag}_downstream'] = y_train.mean()
-
-        X_pred = pd.DataFrame([lag_features], columns=feature_cols)
-
-        try:
-            forecast_value = model.predict(X_pred)[0]
-            forecast_value = np.clip(forecast_value, combined_data['wl_up'].min(), combined_data['wl_up'].max())
-            forecasted_data.at[idx, 'wl_up'] = forecast_value
-            combined_data.at[idx, 'wl_up'] = forecast_value
-        except Exception as e:
-            st.warning(f"ไม่สามารถพยากรณ์ค่าในเวลา {idx} ได้: {e}")
-
-    forecasted_data.reset_index(inplace=True)
-    forecasted_data = forecasted_data.rename(columns={'index': 'datetime'})  # แก้ไขชื่อคอลัมน์
-
-    # ตรวจสอบว่ามีข้อมูลพยากรณ์
-    if forecasted_data['wl_up'].isna().all():
-        st.error("ไม่มีค่าที่พยากรณ์ถูกสร้างขึ้น กรุณาตรวจสอบข้อมูลและการตั้งค่า")
-        return pd.DataFrame()
-
-    # สร้างคอลัมน์ 'ค่าที่พยากรณ์'
-    forecasted_data = forecasted_data.rename(columns={'wl_up': 'ค่าที่พยากรณ์'})
-
-    return forecasted_data
 
 # Streamlit UI
 st.set_page_config(
@@ -967,6 +1141,7 @@ elif model_choice == "Linear Regression":
     st.markdown("---")
 else:
     st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วยโมเดลที่เลือก")
+
 
 
 
