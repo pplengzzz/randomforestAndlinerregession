@@ -362,7 +362,10 @@ def delete_data_by_date_range(data, delete_start_date, delete_end_date):
     return data
 
 def calculate_accuracy_metrics(original, filled, data_deleted):
-    # ผสานข้อมูลตาม datetime
+    """
+    คำนวณค่าความแม่นยำโดยใช้เฉพาะข้อมูลจากสถานีที่ต้องการทำนาย
+    """
+    # ผสานข้อมูลตาม datetime โดยเลือกเฉพาะสถานีที่ต้องการทำนาย
     merged_data = pd.merge(original[['datetime', 'wl_up']], filled[['datetime', 'wl_up2']], on='datetime')
 
     # เลือกเฉพาะข้อมูลที่ถูกลบ
@@ -394,7 +397,10 @@ def calculate_accuracy_metrics(original, filled, data_deleted):
 
 # ฟังก์ชันสำหรับคำนวณค่าความแม่นยำ
 def calculate_accuracy_metrics_linear(original, filled):
-    # ผสานข้อมูลตาม datetime
+    """
+    คำนวณค่าความแม่นยำสำหรับ Linear Regression โดยใช้เฉพาะสถานีที่ต้องการทำนาย
+    """
+    # ผสานข้อมูลตาม datetime โดยเลือกเฉพาะสถานีที่ต้องการทำนาย
     merged_data = pd.merge(original[['datetime', 'wl_up']], filled[['datetime', 'wl_up2']], on='datetime')
 
     # ลบข้อมูลที่มี NaN ออก
@@ -649,7 +655,7 @@ def forecast_with_linear_regression_single(data, forecast_start_date, forecast_d
         lag_features = {}
         for lag in lags:
             lag_time = idx - pd.Timedelta(minutes=15 * lag)
-            if lag_time in combined_data.index and not pd.isnull(combined_data.at[lag_time, 'wl_up']):
+            if lag_time in combined_data.index and not pd.isna(combined_data.at[lag_time, 'wl_up']):
                 lag_value = combined_data.at[lag_time, 'wl_up']
             else:
                 # ถ้าไม่มีค่า lag ให้ใช้ค่าเฉลี่ยของ y_train
@@ -973,7 +979,7 @@ if model_choice == "Random Forest":
 
                     # ตรวจสอบว่ามีข้อมูลในช่วงที่เลือกหรือไม่
                     if df_filtered.empty:
-                        st.warning("ไม่มีข้อมูลในช่วงวันที่ที่เลือก กรุณาเลือกช่วงวันที่ที่มีข้อมูล")
+                        st.warning("ไม่มีข้อมูลในช่วงวันที่ที่เลือก กรุณาเลือกช่วงวันที่มีข้อมูล")
                         processing_placeholder.empty()
                         st.stop()
 
@@ -1170,7 +1176,7 @@ elif model_choice == "Linear Regression":
                                             st.metric(label="Mean Absolute Error (MAE)", value=f"{mae_lr:.4f}")
                                         with col3:
                                             st.metric(label="R-squared (R²)", value=f"{r2_lr:.4f}")
-                                    # หากไม่มีข้อมูลจริงสำหรับการคำนวณความแม่นยำ จะมีข้อความแจ้งเตือนจากฟังก์ชัน calculate_accuracy_metrics
+                                    # หากไม่มีข้อมูลจริงสำหรับการคำนวณความแม่นยำ จะมีข้อความแจ้งเตือนจากฟังก์ชัน calculate_accuracy_metrics_linear
                                 else:
                                     st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
         else:
