@@ -333,27 +333,19 @@ def calculate_accuracy_metrics(original, filled, data_deleted):
         st.metric(label="R-squared (R²)", value=f"{r2:.4f}")
 
 def calculate_accuracy_metrics_linear(original, filled):
-    merged_data = pd.merge(original[['datetime', 'wl_up']], filled[['datetime', 'wl_up2']], on='datetime')
+    merged_data = pd.merge(original[['datetime', 'wl_up']], filled[['datetime', 'ค่าที่พยากรณ์']], on='datetime')
 
-    merged_data = merged_data.dropna(subset=['wl_up', 'wl_up2'])
+    merged_data = merged_data.dropna(subset=['wl_up', 'ค่าที่พยากรณ์'])
 
     if merged_data.empty:
         st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่า MAE และ RMSE ได้")
         return None, None, None, merged_data
 
-    mse = mean_squared_error(merged_data['wl_up'], merged_data['wl_up2'])
-    mae = mean_absolute_error(merged_data['wl_up'], merged_data['wl_up2'])
-    r2 = r2_score(merged_data['wl_up'], merged_data['wl_up2'])
+    mse = mean_squared_error(merged_data['wl_up'], merged_data['ค่าที่พยากรณ์'])
+    mae = mean_absolute_error(merged_data['wl_up'], merged_data['ค่าที่พยากรณ์'])
+    r2 = r2_score(merged_data['wl_up'], merged_data['ค่าที่พยากรณ์'])
 
     return mse, mae, r2, merged_data
-
-def create_comparison_table_streamlit(forecasted_data, actual_data):
-    comparison_df = pd.DataFrame({
-        'Datetime': actual_data['datetime'],
-        'ค่าจริง': actual_data['wl_up'],
-        'ค่าที่พยากรณ์': actual_data['wl_up2']
-    })
-    return comparison_df
 
 def plot_results(data_before, data_filled, data_deleted, data_deleted_option=False):
     # ตรวจสอบว่า 'datetime' มีอยู่ในทั้งสอง DataFrame
@@ -631,6 +623,9 @@ def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_da
     if forecasted_data['wl_up'].isna().all():
         st.error("ไม่มีค่าที่พยากรณ์ถูกสร้างขึ้น กรุณาตรวจสอบข้อมูลและการตั้งค่า")
         return pd.DataFrame()
+
+    # สร้างคอลัมน์ 'ค่าที่พยากรณ์'
+    forecasted_data = forecasted_data.rename(columns={'wl_up': 'ค่าที่พยากรณ์'})
 
     return forecasted_data
 
@@ -972,6 +967,7 @@ elif model_choice == "Linear Regression":
     st.markdown("---")
 else:
     st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วยโมเดลที่เลือก")
+
 
 
 
