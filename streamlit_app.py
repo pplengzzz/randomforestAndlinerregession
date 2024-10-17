@@ -561,6 +561,9 @@ def plot_results_lr(data_before, data_forecasted):
     })
 
     data_forecasted = data_forecasted.reset_index()
+    # ตั้งชื่อคอลัมน์ 'index' เป็น 'datetime' ถ้ายังไม่ได้ตั้ง
+    if 'datetime' not in data_forecasted.columns:
+        data_forecasted.rename(columns={'index': 'datetime'}, inplace=True)
     data_forecasted['วันที่'] = data_forecasted['datetime']
     data_forecasted['ข้อมูลพยากรณ์'] = data_forecasted['wl_up']
 
@@ -633,6 +636,7 @@ def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_da
     forecast_periods = forecast_days * 96
     forecast_index = pd.date_range(start=forecast_start_date, periods=forecast_periods, freq='15T')
     forecasted_data = pd.DataFrame(index=forecast_index, columns=['wl_up'])
+    forecasted_data.index.name = 'datetime'  # ตั้งชื่อดัชนีเป็น 'datetime'
 
     combined_data = data.copy()
     if upstream_data is not None:
@@ -1042,6 +1046,7 @@ elif model_choice == "Linear Regression":
                                 st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
     else:
         st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วย Linear Regression")
+
 
 
 
