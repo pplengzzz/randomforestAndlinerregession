@@ -357,34 +357,25 @@ def create_comparison_table_streamlit(forecasted_data, actual_data):
     })
     return comparison_df
 
-def plot_results(data_before, data_filled, data_deleted, data_deleted_option=False, forecasted=None):
-    data_before_filled = pd.DataFrame({
-        'วันที่': data_before['datetime'],
-        'ข้อมูลเดิม': data_before['wl_up']
-    })
+def plot_results(data_before, data_filled, data_deleted, data_deleted_option=False):
+    # เปลี่ยนชื่อคอลัมน์ 'datetime' เป็น 'วันที่'
+    data_before_filled = data_before.copy()
+    data_before_filled.rename(columns={'datetime': 'วันที่'}, inplace=True)
+    data_before_filled['ข้อมูลเดิม'] = data_before_filled['wl_up']
 
-    data_after_filled = pd.DataFrame({
-        'วันที่': data_filled['datetime'],
-        'ข้อมูลหลังเติมค่า': data_filled['wl_up2']
-    })
+    data_after_filled = data_filled.copy()
+    data_after_filled.rename(columns={'datetime': 'วันที่'}, inplace=True)
+    data_after_filled['ข้อมูลหลังเติมค่า'] = data_after_filled['wl_up2']
 
-    combined_data = pd.merge(data_before_filled, data_after_filled, on='วันที่', how='outer')
+    combined_data = pd.merge(data_before_filled[['วันที่', 'ข้อมูลเดิม']], data_after_filled[['วันที่', 'ข้อมูลหลังเติมค่า']], on='วันที่', how='outer')
 
     if data_deleted_option and data_deleted is not None and not data_deleted.empty:
-        data_after_deleted = pd.DataFrame({
-            'วันที่': data_deleted['datetime'],
-            'ข้อมูลหลังลบ': data_deleted['wl_up']
-        })
-        combined_data = pd.merge(combined_data, data_after_deleted, on='วันที่', how='outer')
+        data_after_deleted = data_deleted.copy()
+        data_after_deleted.rename(columns={'datetime': 'วันที่'}, inplace=True)
+        data_after_deleted['ข้อมูลหลังลบ'] = data_after_deleted['wl_up']
+        combined_data = pd.merge(combined_data, data_after_deleted[['วันที่', 'ข้อมูลหลังลบ']], on='วันที่', how='outer')
     else:
         data_after_deleted = None
-
-    if forecasted is not None and not forecasted.empty:
-        forecast_df = pd.DataFrame({
-            'วันที่': forecasted['datetime'],
-            'ค่าที่พยากรณ์': forecasted['wl_up']
-        })
-        combined_data = pd.merge(combined_data, forecast_df, on='วันที่', how='outer')
 
     # ตรวจสอบว่าคอลัมน์ใดบ้างที่มีอยู่ใน combined_data
     available_columns = combined_data.columns.tolist()
@@ -396,14 +387,11 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
         y_columns.append('ข้อมูลหลังเติมค่า')
     if 'ข้อมูลหลังลบ' in available_columns:
         y_columns.append('ข้อมูลหลังลบ')
-    if 'ค่าที่พยากรณ์' in available_columns:
-        y_columns.append('ค่าที่พยากรณ์')
 
     color_discrete_map = {
         "ข้อมูลเดิม": "#ef553b",
         "ข้อมูลหลังเติมค่า": "#636efa",
-        "ข้อมูลหลังลบ": "#00cc96",
-        "ค่าที่พยากรณ์": "#00cc96"
+        "ข้อมูลหลังลบ": "#00cc96"
     }
 
     # วาดกราฟด้วยคอลัมน์ที่มีอยู่จริง
@@ -413,7 +401,7 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
 
     fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
 
-    st.header("ข้อมูลหลังจากการเติมค่าที่หายไปหรือการพยากรณ์", divider='gray')
+    st.header("ข้อมูลหลังจากการเติมค่าที่หายไป", divider='gray')
     st.plotly_chart(fig, use_container_width=True)
 
     st.header("ตารางแสดงข้อมูลหลังเติมค่า", divider='gray')
@@ -422,23 +410,58 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
 
     if data_deleted_option:
         calculate_accuracy_metrics(original=data_before, filled=data_filled, data_deleted=data_deleted)
-    elif forecasted is not None and not forecasted.empty:
-        st.header("ผลค่าความแม่นยำ", divider='gray')
-        mse_lr, mae_lr, r2_lr, merged_data_lr = calculate_accuracy_metrics_linear(
-            original=data_before,
-            filled=data_filled
-        )
-        if mse_lr is not None:
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric(label="Mean Squared Error (MSE)", value=f"{mse_lr:.4f}")
-            with col2:
-                st.metric(label="Mean Absolute Error (MAE)", value=f"{mae_lr:.4f}")
-            with col3:
-                st.metric(label="R-squared (R²)", value=f"{r2_lr:.4f}")
     else:
         st.header("ผลค่าความแม่นยำ", divider='gray')
-        st.info("ไม่สามารถคำนวณความแม่นยำได้เนื่องจากไม่มีการลบข้อมูลหรือการพยากรณ์")
+        st.info("ไม่สามารถคำนวณความแม่นยำได้เนื่องจากไม่มีการลบข้อมูล")
+
+def plot_results_linear(data_before, forecasted_data, training_end_datetime_lr):
+    # data_before: ข้อมูลจริงก่อนช่วงพยากรณ์
+    # forecasted_data: ข้อมูลที่พยากรณ์ได้
+    # training_end_datetime_lr: เวลาสิ้นสุดการฝึกโมเดล
+
+    # รวมข้อมูลจริงและข้อมูลที่พยากรณ์
+    data_before = data_before.copy()
+    data_before = data_before[data_before['datetime'] <= training_end_datetime_lr]
+    data_before.rename(columns={'datetime': 'วันที่'}, inplace=True)
+    data_before['ข้อมูลเดิม'] = data_before['wl_up']
+
+    forecasted_data = forecasted_data.copy()
+    forecasted_data.rename(columns={'datetime': 'วันที่'}, inplace=True)
+    forecasted_data['ค่าที่พยากรณ์'] = forecasted_data['wl_up']
+
+    combined_data = pd.concat([data_before[['วันที่', 'ข้อมูลเดิม']], forecasted_data[['วันที่', 'ค่าที่พยากรณ์']]], ignore_index=True)
+
+    # ตรวจสอบว่ามีข้อมูลจริงสำหรับช่วงที่พยากรณ์หรือไม่
+    merged_data = pd.merge(data_before[['วันที่', 'ข้อมูลเดิม']], forecasted_data[['วันที่', 'ค่าที่พยากรณ์']], on='วันที่', how='inner')
+
+    # วาดกราฟ
+    fig = px.line(combined_data, x='วันที่', y=['ข้อมูลเดิม', 'ค่าที่พยากรณ์'],
+                  labels={'value': 'ระดับน้ำ (wl_up)', 'variable': 'ประเภทข้อมูล'})
+
+    fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
+
+    st.header("ผลการพยากรณ์ด้วย Linear Regression", divider='gray')
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.header("ตารางค่าที่พยากรณ์", divider='gray')
+    st.dataframe(forecasted_data[['วันที่', 'ค่าที่พยากรณ์']], use_container_width=True)
+
+    # คำนวณค่าความแม่นยำถ้ามีข้อมูลจริง
+    if not merged_data.empty:
+        mse = mean_squared_error(merged_data['ข้อมูลเดิม'], merged_data['ค่าที่พยากรณ์'])
+        mae = mean_absolute_error(merged_data['ข้อมูลเดิม'], merged_data['ค่าที่พยากรณ์'])
+        r2 = r2_score(merged_data['ข้อมูลเดิม'], merged_data['ค่าที่พยากรณ์'])
+
+        st.header("ผลค่าความแม่นยำ", divider='gray')
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(label="Mean Squared Error (MSE)", value=f"{mse:.4f}")
+        with col2:
+            st.metric(label="Mean Absolute Error (MAE)", value=f"{mae:.4f}")
+        with col3:
+            st.metric(label="R-squared (R²)", value=f"{r2:.4f}")
+    else:
+        st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่าความแม่นยำได้")
 
 def plot_data_preview(df_pre, df2_pre, df3_pre, total_time_lag_upstream, total_time_lag_downstream):
     data_pre1 = pd.DataFrame({
@@ -827,7 +850,7 @@ if model_choice == "Random Forest":
 
                     processing_placeholder.empty()
 
-                    plot_results(df_before_deletion, df_handled, df_deleted, data_deleted_option=delete_data_option)
+                    plot_results(data_before=df_before_deletion, data_filled=df_handled, data_deleted=df_deleted, data_deleted_option=delete_data_option)
 
         st.markdown("---")
 
@@ -921,35 +944,17 @@ elif model_choice == "Linear Regression":
                     )
 
                     df_lr_clean.reset_index(inplace=True)
-                    df_result_lr = df_lr_clean.copy()
-                    df_result_lr['wl_up2'] = df_result_lr['wl_up']
-                    df_result_lr['wl_forecast'] = np.nan
-                    df_result_lr['timestamp'] = pd.Timestamp.now()
-                    df_result_lr = fill_code_column(df_result_lr)
-
                     forecasted_data_lr['wl_up2'] = forecasted_data_lr['wl_up']
-                    forecasted_data_lr['wl_forecast'] = forecasted_data_lr['wl_up']
-                    forecasted_data_lr['timestamp'] = pd.Timestamp.now()
-                    forecasted_data_lr['code'] = df_result_lr['code'].iloc[0] if 'code' in df_result_lr.columns else 'Unknown'
+                    df_lr_clean['datetime'] = pd.to_datetime(df_lr_clean['datetime'])
 
-                    df_result_lr = pd.concat([df_result_lr, forecasted_data_lr], ignore_index=True)
-
-                    if not pd.api.types.is_datetime64_any_dtype(df_result_lr['datetime']):
-                        df_result_lr['datetime'] = pd.to_datetime(df_result_lr['datetime'], errors='coerce')
-
-                    plot_results(
-                        data_before=df_lr_clean,
-                        data_filled=df_result_lr,
-                        data_deleted=None,
-                        data_deleted_option=False,
-                        forecasted=forecasted_data_lr
-                    )
+                    plot_results_linear(data_before=df_lr_clean, forecasted_data=forecasted_data_lr, training_end_datetime_lr=training_end_datetime_lr)
 
                     processing_placeholder.empty()
 
         st.markdown("---")
     else:
         st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วย Linear Regression")
+
 
 
 
