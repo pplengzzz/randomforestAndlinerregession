@@ -394,6 +394,11 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
         "ข้อมูลหลังลบ": "#00cc96"
     }
 
+    # ตรวจสอบว่ามีคอลัมน์ y ที่จะวาดกราฟ
+    if not y_columns:
+        st.error("ไม่มีข้อมูลสำหรับวาดกราฟ")
+        return
+
     # วาดกราฟด้วยคอลัมน์ที่มีอยู่จริง
     fig = px.line(combined_data, x='วันที่', y=y_columns,
                   labels={'value': 'ระดับน้ำ (wl_up)', 'variable': 'ประเภทข้อมูล'},
@@ -419,7 +424,7 @@ def plot_results_linear(data_before, forecasted_data, training_end_datetime_lr):
     # forecasted_data: ข้อมูลที่พยากรณ์ได้
     # training_end_datetime_lr: เวลาสิ้นสุดการฝึกโมเดล
 
-    # รวมข้อมูลจริงและข้อมูลที่พยากรณ์
+    # เปลี่ยนชื่อคอลัมน์ 'datetime' เป็น 'วันที่'
     data_before = data_before.copy()
     data_before = data_before[data_before['datetime'] <= training_end_datetime_lr]
     data_before.rename(columns={'datetime': 'วันที่'}, inplace=True)
@@ -431,12 +436,16 @@ def plot_results_linear(data_before, forecasted_data, training_end_datetime_lr):
 
     combined_data = pd.concat([data_before[['วันที่', 'ข้อมูลเดิม']], forecasted_data[['วันที่', 'ค่าที่พยากรณ์']]], ignore_index=True)
 
-    # ตรวจสอบว่ามีข้อมูลจริงสำหรับช่วงที่พยากรณ์หรือไม่
-    merged_data = pd.merge(data_before[['วันที่', 'ข้อมูลเดิม']], forecasted_data[['วันที่', 'ค่าที่พยากรณ์']], on='วันที่', how='inner')
+    # ตรวจสอบว่ามีคอลัมน์ 'ข้อมูลเดิม' และ 'ค่าที่พยากรณ์'
+    if 'ข้อมูลเดิม' not in combined_data.columns or 'ค่าที่พยากรณ์' not in combined_data.columns:
+        st.error("ข้อมูลสำหรับการวาดกราฟไม่ครบถ้วน")
+        st.write(combined_data.head())
+        return
 
     # วาดกราฟ
     fig = px.line(combined_data, x='วันที่', y=['ข้อมูลเดิม', 'ค่าที่พยากรณ์'],
-                  labels={'value': 'ระดับน้ำ (wl_up)', 'variable': 'ประเภทข้อมูล'})
+                  labels={'value': 'ระดับน้ำ (wl_up)', 'variable': 'ประเภทข้อมูล'},
+                  title='การพยากรณ์ระดับน้ำด้วย Linear Regression')
 
     fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
 
@@ -447,6 +456,12 @@ def plot_results_linear(data_before, forecasted_data, training_end_datetime_lr):
     st.dataframe(forecasted_data[['วันที่', 'ค่าที่พยากรณ์']], use_container_width=True)
 
     # คำนวณค่าความแม่นยำถ้ามีข้อมูลจริง
+    # ตรวจสอบช่วงพยากรณ์ว่ามีข้อมูลจริงหรือไม่
+    actual_data = data_before.copy()
+    actual_data = actual_data[data_before['datetime'] > training_end_datetime_lr]
+
+    merged_data = pd.merge(actual_data[['วันที่', 'ข้อมูลเดิม']], forecasted_data[['วันที่', 'ค่าที่พยากรณ์']], on='วันที่', how='inner')
+
     if not merged_data.empty:
         mse = mean_squared_error(merged_data['ข้อมูลเดิม'], merged_data['ค่าที่พยากรณ์'])
         mae = mean_absolute_error(merged_data['ข้อมูลเดิม'], merged_data['ค่าที่พยากรณ์'])
@@ -578,7 +593,7 @@ def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_da
     model = LinearRegression()
     model.fit(X_train, y_train)
 
-    forecast_periods = forecast_days * 96
+    forecast_periods = forecast_days * 96  # 96 intervals per day (15-minute intervals)
     forecast_index = pd.date_range(start=forecast_start_date, periods=forecast_periods, freq='15T')
     forecasted_data = pd.DataFrame(index=forecast_index, columns=['wl_up'])
 
@@ -676,7 +691,8 @@ with st.sidebar:
 
         with st.sidebar.expander("เลือกช่วงข้อมูลสำหรับฝึกโมเดล", expanded=False):
             start_date = st.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2024-08-01"))
-            end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2024-08-31")) + pd.DateOffset(hours=23, minutes=45)
+            end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2024-08-31"))
+            end_date = pd.to_datetime(end_date) + pd.DateOffset(hours=23, minutes=45)
 
             delete_data_option = st.checkbox("ต้องการเลือกลบข้อมูล", value=False)
 
@@ -852,7 +868,7 @@ if model_choice == "Random Forest":
 
                     plot_results(data_before=df_before_deletion, data_filled=df_handled, data_deleted=df_deleted, data_deleted_option=delete_data_option)
 
-        st.markdown("---")
+    st.markdown("---")
 
 elif model_choice == "Linear Regression":
     if uploaded_fill_lr or uploaded_up_lr or uploaded_down_lr:
@@ -947,13 +963,18 @@ elif model_choice == "Linear Regression":
                     forecasted_data_lr['wl_up2'] = forecasted_data_lr['wl_up']
                     df_lr_clean['datetime'] = pd.to_datetime(df_lr_clean['datetime'])
 
+                    # เติมคอลัมน์ 'code'
+                    df_lr_clean = fill_code_column(df_lr_clean)
+                    forecasted_data_lr = fill_code_column(forecasted_data_lr)
+
                     plot_results_linear(data_before=df_lr_clean, forecasted_data=forecasted_data_lr, training_end_datetime_lr=training_end_datetime_lr)
 
                     processing_placeholder.empty()
 
-        st.markdown("---")
-    else:
-        st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วย Linear Regression")
+    st.markdown("---")
+else:
+    st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วยโมเดลที่เลือก")
+
 
 
 
