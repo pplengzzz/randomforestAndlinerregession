@@ -563,6 +563,17 @@ def plot_data_combined_LR_stations(data, forecasted=None, upstream_data=None, do
     else:
         combined_data['ค่าที่พยากรณ์'] = np.nan
 
+    # ตรวจสอบคอลัมน์ใน combined_data
+    st.write("คอลัมน์ใน combined_data:", combined_data.columns.tolist())
+    st.write("ข้อมูลตัวอย่างจาก combined_data:")
+    st.dataframe(combined_data.head())
+
+    # ตรวจสอบว่าคอลัมน์ 'wl_up' และ 'ค่าที่พยากรณ์' มีอยู่หรือไม่
+    if 'wl_up' not in combined_data.columns:
+        st.error("คอลัมน์ 'wl_up' ไม่พบใน combined_data")
+    if 'ค่าที่พยากรณ์' not in combined_data.columns:
+        st.error("คอลัมน์ 'ค่าที่พยากรณ์' ไม่พบใน combined_data")
+
     # Plot ด้วย Plotly
     fig = px.line(
         combined_data,
