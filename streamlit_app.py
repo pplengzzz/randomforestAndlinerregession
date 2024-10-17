@@ -432,10 +432,6 @@ def plot_results_linear(data_before, forecasted_data, training_end_datetime_lr):
 
     combined_data = pd.merge(data_before[['datetime', 'ข้อมูลเดิม']], forecasted_data[['datetime', 'ค่าที่พยากรณ์']], on='datetime', how='outer')
 
-    # แสดงตัวอย่างข้อมูลเพื่อการดีบัก
-    st.write("ตัวอย่างข้อมูลก่อนการวาดกราฟ:")
-    st.write(combined_data.head())
-
     # ตรวจสอบว่ามีคอลัมน์ที่ต้องการสำหรับการวาดกราฟ
     if 'ข้อมูลเดิม' not in combined_data.columns or 'ค่าที่พยากรณ์' not in combined_data.columns:
         st.error("ไม่มีคอลัมน์ 'ข้อมูลเดิม' หรือ 'ค่าที่พยากรณ์' ในข้อมูลที่รวม")
@@ -641,10 +637,6 @@ def forecast_with_linear_regression_multi(data, forecast_start_date, forecast_da
 
     forecasted_data.reset_index(inplace=True)
     forecasted_data = forecasted_data.rename(columns={'index': 'datetime'})  # แก้ไขชื่อคอลัมน์
-
-    # แสดงตัวอย่างข้อมูลหลังจากพยากรณ์
-    st.write("ตัวอย่างข้อมูลที่พยากรณ์:")
-    st.write(forecasted_data.head())
 
     return forecasted_data
 
@@ -966,6 +958,11 @@ elif model_choice == "Linear Regression":
                         delay_hours_down=delay_hours_down_lr
                     )
 
+                    if forecasted_data_lr.empty:
+                        st.error("ไม่มีค่าที่พยากรณ์ถูกสร้างขึ้น กรุณาตรวจสอบข้อมูลและการตั้งค่า")
+                        processing_placeholder.empty()
+                        st.stop()
+
                     df_lr_clean.reset_index(inplace=True)
                     forecasted_data_lr['wl_up2'] = forecasted_data_lr['wl_up']
                     df_lr_clean['datetime'] = pd.to_datetime(df_lr_clean['datetime'])
@@ -981,6 +978,7 @@ elif model_choice == "Linear Regression":
     st.markdown("---")
 else:
     st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วยโมเดลที่เลือก")
+
 
 
 
